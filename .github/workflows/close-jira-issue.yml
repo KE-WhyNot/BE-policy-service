@@ -1,0 +1,74 @@
+# GitHub 이슈가 닫혔을 때 실행될 워크플로우의 이름
+name: Close Jira issue
+
+# 워크플로우 실행 조건: issues 이벤트 중 'closed' 타입일 때
+on:
+  issues:
+    types:
+      - closed
+
+# 실행될 작업 정의
+jobs:
+  close-issue-in-jira:
+    name: Close Jira issue
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Jira 로그인
+      - name: Login to Jira
+        uses: atlassian/gajira-login@v3
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+
+      # 2. GitHub 이슈 제목, 본문, 댓글에서 Jira 이슈 키 추출
+      - name: Extract Jira issue key from title, body, or comments
+        uses: actions/github-script@v7
+        id: extract-key
+        with:
+          script: |
+            const issueTitle = context.payload.issue.title;
+            const issueBody = context.payload.issue.body;
+            const regex = /([A-Z]+-[0-9]+)/;
+            const bodyRegex = /\/browse\/([A-Z]+-[0-9]+)/;
+
+            // 1. 제목에서 키 찾기
+            let match = issueTitle.match(regex);
+            if (match) {
+              core.setOutput('jira_key', match[1]);
+              console.log(`Found Jira key ${match[1]} in title.`);
+              return;
+            }
+
+            // 2. 본문에서 키 찾기 (Jira 링크 형식)
+            match = issueBody.match(bodyRegex);
+            if (match) {
+              core.setOutput('jira_key', match[1]);
+              console.log(`Found Jira key ${match[1]} in body.`);
+              return;
+            }
+
+            // 3. 댓글에서 키 찾기 (Jira 링크 형식)
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            for (const comment of comments) {
+              match = comment.body.match(bodyRegex);
+              if (match) {
+                core.setOutput('jira_key', match[1]);
+                console.log(`Found Jira key ${match[1]} in comments.`);
+                return;
+              }
+            }
+
+      # 3. Jira 이슈 상태를 '완료'로 변경
+      # 위 스텝에서 JIRA_KEY를 성공적으로 찾았을 경우에만 실행됩니다.
+      - name: Transition Jira issue to Done
+        if: steps.extract-key.outputs.jira_key
+        uses: atlassian/gajira-transition@v3
+        with:
+          issue: ${{ steps.extract-key.outputs.jira_key }}
+          transition: "완료"
