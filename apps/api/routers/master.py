@@ -1,16 +1,51 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from apps.api.core.db import get_db
 
+from apps.api.schemas.master.category import Category
 from apps.api.schemas.master.education import Education
 from apps.api.schemas.master.job_status import JobStatus
 from apps.api.schemas.master.keyword import Keyword
 from apps.api.schemas.master.major import Major
+from apps.api.schemas.master.region import Region
 from apps.api.schemas.master.specialization import Specialization
+from apps.api.schemas.master.response import ListResponse, Meta
 
 router = APIRouter(prefix="/master", tags=["master"])
+
+# /api/master/category
+@router.get("/category/{parent_id}", response_model=list[Category])
+async def list_category(
+    parent_id: int = Path(..., description="0이면 최상위 카테고리, 실제 ID면 해당 카테고리의 하위 카테고리"),
+    include_inactive: bool = Query(False, description="true면 비활성 포함"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    카테고리 목록 조회
+    - parent_id=0: 최상위(Large) 카테고리 조회
+    - parent_id=실제ID: 해당 카테고리의 하위(Medium) 카테고리 조회
+    """
+    # parent_id가 0이면 최상위 카테고리 (parent_id IS NULL)
+    # 그렇지 않으면 해당 parent_id의 하위 카테고리
+    if parent_id == 0:
+        where_condition = "parent_id IS NULL"
+    else:
+        where_condition = f"parent_id = {parent_id}"
+    
+    if not include_inactive:
+        where_condition += " AND is_active = true"
+    
+    sql = f"""
+        SELECT id, code, name, parent_id, level, is_active
+        FROM master.category
+        WHERE {where_condition}
+        ORDER BY id
+    """
+    
+    rows = (await db.execute(text(sql))).mappings().all()
+    return [Category(**r) for r in rows]
 
 # /api/master/education
 @router.get("/education", response_model=list[Education])
@@ -77,6 +112,49 @@ async def list_major(
 
     rows = (await db.execute(text(sql))).mappings().all()
     return [Major(**r) for r in rows]
+
+# /api/master/region
+@router.get("/region/{parent_id}", response_model=ListResponse[Region])
+async def list_region(
+    parent_id: int = Path(..., description="2이면 최상위 지역(시/도), 실제 ID면 해당 지역의 하위 지역(시/군/구)"),
+    include_inactive: bool = Query(False, description="true면 비활성 포함"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    지역 목록 조회
+    - parent_id=0: 최상위(시/도) 지역 조회
+    - parent_id=실제ID: 해당 지역의 하위(시/군/구) 지역 조회
+    """
+    # parent_id가 0이면 최상위 지역 (parent_id IS 2)
+    # 그렇지 않으면 해당 parent_id의 하위 지역
+    if parent_id == 0:
+        where_condition = "parent_id IS 2"
+    else:
+        where_condition = f"parent_id = {parent_id}"
+    
+    if not include_inactive:
+        where_condition += " AND is_active = true"
+    
+    sql = f"""
+        SELECT id, code, name, parent_id, kind, zip_code, is_active
+        FROM master.region
+        WHERE {where_condition}
+        ORDER BY id
+    """
+    
+    rows = (await db.execute(text(sql))).mappings().all()
+    
+    # 순서 번호(no)를 추가하여 Region 객체 생성
+    regions = []
+    for idx, row in enumerate(rows, 1):
+        region_data = dict(row)
+        region_data['no'] = idx
+        regions.append(Region(**region_data))
+    
+    return ListResponse[Region](
+        data=regions,
+        meta=Meta(count=len(regions))
+    )
 
 # /api/master/specialization
 @router.get("/specialization", response_model=list[Specialization])
