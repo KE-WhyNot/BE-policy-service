@@ -52,7 +52,7 @@ class PolicyDetailResponse(BaseModel):
         # core.policy.description_raw 반환
 
     # 사업 운영 기간
-    # TODO: 다음 항목들 구현 - period_type (bizPrdSecd), period_start (bizPrdBgngYmd), period_end (bizPrdEndYmd), period_etc (bizPrdEtcCn)
+    # TODO: 다음 항목들 구현 (core.policy) - period_type (bizPrdSecd), period_start (bizPrdBgngYmd), period_end (bizPrdEndYmd), period_etc (bizPrdEtcCn)
     period_biz: str | None = None
         # 1. period_type 확인
         # 2-1. 특정기간인 경우 -> {period_start} ~ {period_end} 반환
@@ -126,7 +126,7 @@ class PolicyDetailResponse(BaseModel):
         #          master.specialization.name 들을 ", "로 연결한 문자열 반환
 
     # 추가사항
-    # TODO: DB 컬럼 추가 및 elt 구현 (addAplyQlfcCndCn)
+    # TODO: DB 컬럼 추가 및 elt 구현 (addAplyQlfcCndCn -> eligibility_additional)
     eligibility_additional: str | None = None 
         # core.policy_eligibility.eligibility_additional 반환
         # null 이면 "없음" 반환
