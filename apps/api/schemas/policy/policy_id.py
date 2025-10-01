@@ -52,7 +52,8 @@ class PolicyDetailResponse(BaseModel):
         # core.policy.description_raw 반환
 
     # 사업 운영 기간
-    # TODO: 다음 항목들 구현 (core.policy) - period_type (bizPrdSecd), period_start (bizPrdBgngYmd), period_end (bizPrdEndYmd), period_etc (bizPrdEtcCn)
+    # DONE: 컬럼 추가 (core.policy) - period_type (bizPrdSecd), period_start (bizPrdBgngYmd), period_end (bizPrdEndYmd), period_etc (bizPrdEtcCn)
+    # TODO: ELT 구현 (core.policy) - period_type (bizPrdSecd), period_start (bizPrdBgngYmd), period_end (bizPrdEndYmd), period_etc (bizPrdEtcCn)
     period_biz: str | None = None
         # 1. period_type 확인
         # 2-1. 특정기간인 경우 -> {period_start} ~ {period_end} 반환
@@ -60,7 +61,7 @@ class PolicyDetailResponse(BaseModel):
         # 3. period_etc 가 있으면 -> "{위 2가지 결과} ({period_etc})" 형태로 반환
     
     # 사업 신청기간 - ex) "상시" or 날짜
-    # TODO: 다음 항목 구현 - apply_type (aplyPrdSeCd)
+    # 컬럼 추가 완료 (core.policy) - apply_type (aplyPrdSeCd)
     # TODO: ELT 로직 변경 (현재 aplyPrdSeCd, 신청기간 구분코드가 status로 들어가고 있음)
     period_apply: str | None = None
         # 1. apply_type 확인
@@ -92,7 +93,7 @@ class PolicyDetailResponse(BaseModel):
         # 2-3. "TEXT" -> core.policy_eligibility.income_text 반환
         # 2-4. "UNKNOWN" -> "신청 사이트 내 확인" 반환
 
-    # TODO: core.policy_eligibility에 다음 컬럼 추가 : 학력, 전공, 취업상태, 특화분야 제한여부 (restrict_education: true/false)
+    # DONE: core.policy_eligibility에 다음 컬럼 추가 : 학력, 전공, 취업상태, 특화분야 제한여부 (restrict_education: true/false)
     # 학력
     education: str | None = None
         # 1. core.policy_eligibility.restrict_education 확인
@@ -126,38 +127,46 @@ class PolicyDetailResponse(BaseModel):
         #          master.specialization.name 들을 ", "로 연결한 문자열 반환
 
     # 추가사항
-    # TODO: DB 컬럼 추가 및 elt 구현 (addAplyQlfcCndCn -> eligibility_additional)
+    # DONE: DB 컬럼 추가 (addAplyQlfcCndCn -> eligibility_additional)
+    # TODO: elt 구현 (addAplyQlfcCndCn -> eligibility_additional)
     eligibility_additional: str | None = None 
         # core.policy_eligibility.eligibility_additional 반환
         # null 이면 "없음" 반환
 
     # 참여 제한 대상
-    # TODO: DB 컬럼 추가 및 elt 구현 (ptcpPrpTrgtCn)
+    # DONE: DB 컬럼 추가 (ptcpPrpTrgtCn -> eligibility_restrictive)
+    # TODO: elt 구현 (ptcpPrpTrgtCn -> eligibility_restrictive)
     eligibility_restrictive: str | None = None
         # core.policy_eligibility.eligibility_restrictive 반환
         # null 이면 "없음" 반환
 
 # 신청방법
     # 신청절차
-    # TODO: DB 컬럼 추가 및 elt 구현 (plcyAplyMthdCn -> application_process)
+    # DONE: DB 컬럼 추가 (plcyAplyMthdCn -> application_process)
+    # TODO: elt 구현 (plcyAplyMthdCn -> application_process)
     application_process: str | None = None
+        # core.policy.application_process 반환
 
     # 심사 및 발표
-    # TODO: DB 컬럼 추가 및 elt 구현 (srngMthdCn -> announcement)
+    # DONE: DB 컬럼 추가  (srngMthdCn -> announcement)
+    # TODO: elt 구현 (srngMthdCn -> announcement)
     announcement: str | None = None
+        # core.policy.announcement 반환
 
     # 신청 사이트
     apply_url: str | None = None
         # core.policy.aplyUrl 반환
 
     # 제출 서류
-    # TODO: DB 컬럼 추가 및 elt 구현 (sbmsnDcmntCn -> required_documents)
+    # DONE: DB 컬럼 추가 (sbmsnDcmntCn -> required_documents)
+    # TODO: elt 구현 (sbmsnDcmntCn -> required_documents)
     required_documents: str | None = None
         # core.policy.required_documents 반환
 
 # 기타
     # 기타 정보
-    # TODO: DB 컬럼 추가 및 elt 구현 (etcMttrCn -> info_etc)
+    # DONE: DB 컬럼 추가 (etcMttrCn -> info_etc)
+    # TODO: elt 구현 (etcMttrCn -> info_etc)
     info_etc: str | None = None
         # core.policy.info_etc 반환
 
@@ -183,7 +192,8 @@ class PolicyDetailResponse(BaseModel):
         # core.policy.last_external_modified 반환 (timestampz -> kst 적용)
 
     # 최초 등록일
-    # TODO: DB 컬럼 추가 및 elt 구현 (frstRegDt -> first_external_created)
+    # DONE: DB 컬럼 추가 (frstRegDt -> first_external_created)
+    # TODO: elt 구현 (frstRegDt -> first_external_created)
     first_external_created: date | None = None 
         # core.policy.first_external_created 반환 (timestampz -> kst 적용)
     
