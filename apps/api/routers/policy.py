@@ -1,3 +1,6 @@
+# TODO: 정렬 쿼리 추가 (마감임박순, 최신순, 오래된 순)
+# TODO: 마감된 정책은 마지막에 출력
+
 DEBUG = True
 
 from fastapi import APIRouter, HTTPException, Depends, Query
