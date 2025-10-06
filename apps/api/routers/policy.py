@@ -1,3 +1,5 @@
+DEBUG = True
+
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -34,7 +36,7 @@ async def get_policy_list(
 # 정책 분야
     # 카테고리(소분류) 체크박스
     # 받은 name값과 일치하는 master.category의 name으로 master.category의 id 조회 -> core.policy_category에서 category_id로 policy_id 조회
-    category_small: str | None = Query(default=None, description="카테고리(소분류) : 한글 name값"),
+    category_small: list[str] | None = Query(default=None, description="카테고리(소분류) : 한글 name값"),
 
 # 퍼스널 정보
     # 지역 (checkbox list)
@@ -121,21 +123,20 @@ async def get_policy_list(
     
     # 지역 필터
     if regions:
-        joins.append("LEFT JOIN core.policy_region pr ON p.id = pr.policy_id")
         where_conditions.append("pr.region_id = ANY(string_to_array(:regions, ',')::int[])")
         params["regions"] = ','.join(regions)
     
     # 카테고리 필터
     if category_small:
-        where_conditions.append("c.name = :category_small")
-        params["category_small"] = category_small
+        where_conditions.append("c.name = ANY(string_to_array(:category_small, ',')::text[])")
+        params["category_small"] = ','.join(category_small)
     
     # 자격요건 관련 필터들이 있는 경우에만 policy_eligibility JOIN
     eligibility_needed = any([marital_status, age is not None, income_min is not None, income_max is not None, 
                              education, major, job_status, specialization])
     
     if eligibility_needed:
-        joins.append("LEFT JOIN core.policy_eligibility pe ON p.id = pe.policy_id")
+        # joins.append("LEFT JOIN core.policy_eligibility pe ON p.id = pe.policy_id")
         
         # 혼인상태 필터
         if marital_status:
@@ -162,29 +163,29 @@ async def get_policy_list(
         
         # 학력 필터
         if education:
-            joins.append("LEFT JOIN core.policy_eligibility_education pee ON pe.policy_id = pee.policy_id")
-            joins.append("LEFT JOIN master.education e ON pee.education_id = e.id")
-            where_conditions.append("(pe.restrict_education = FALSE OR e.name = ANY(string_to_array(:education, ',')::text[]))")
+            # joins.append("LEFT JOIN core.policy_eligibility_education pee ON pe.policy_id = pee.policy_id")
+            # joins.append("LEFT JOIN master.education e ON pee.education_id = e.id")
+            where_conditions.append("(pe.restrict_education = TRUE AND e.name = ANY(string_to_array(:education, ',')::text[]))")
             params["education"] = ','.join(education)
         
         # 전공 필터
         if major:
-            joins.append("LEFT JOIN core.policy_eligibility_major pem ON pe.policy_id = pem.policy_id")
-            joins.append("LEFT JOIN master.major m ON pem.major_id = m.id")
-            where_conditions.append("(pe.restrict_major = FALSE OR m.name = ANY(string_to_array(:major, ',')::text[]))")
+            # joins.append("LEFT JOIN core.policy_eligibility_major pem ON pe.policy_id = pem.policy_id")
+            # joins.append("LEFT JOIN master.major m ON pem.major_id = m.id")
+            where_conditions.append("(pe.restrict_major = TRUE AND m.name = ANY(string_to_array(:major, ',')::text[]))")
             params["major"] = ','.join(major)
         
         # 취업상태 필터
         if job_status:
-            joins.append("LEFT JOIN core.policy_eligibility_job_status pejs ON pe.policy_id = pejs.policy_id")
-            joins.append("LEFT JOIN master.job_status js ON pejs.job_status_id = js.id")
-            where_conditions.append("(pe.restrict_job_status = FALSE OR js.name = ANY(string_to_array(:job_status, ',')::text[]))")
+            # joins.append("LEFT JOIN core.policy_eligibility_job_status pejs ON pe.policy_id = pejs.policy_id")
+            # joins.append("LEFT JOIN master.job_status js ON pejs.job_status_id = js.id")
+            where_conditions.append("(pe.restrict_job_status = TRUE AND js.name = ANY(string_to_array(:job_status, ',')::text[]))")
             params["job_status"] = ','.join(job_status)
         
         # 특화분야 필터
         if specialization:
-            joins.append("LEFT JOIN core.policy_eligibility_specialization pes ON pe.policy_id = pes.policy_id")
-            joins.append("LEFT JOIN master.specialization s ON pes.specialization_id = s.id")
+            # joins.append("LEFT JOIN core.policy_eligibility_specialization pes ON pe.policy_id = pes.policy_id")
+            # joins.append("LEFT JOIN master.specialization s ON pes.specialization_id = s.id")
             where_conditions.append("(pes.policy_id IS NOT NULL AND s.name = ANY(string_to_array(:specialization, ',')::text[]))")
             params["specialization"] = ','.join(specialization)
 
@@ -256,10 +257,20 @@ async def get_policy_list(
         })
 
     # 전체 개수 조회
+    if DEBUG:
+        print("=== COUNT SQL ===")
+        print(count_sql)
+        print("=== PARAMS ===")
+        print(params)
+        
     count_result = await db.execute(text(count_sql), params)
     total_count = count_result.scalar()
 
     # 데이터 조회
+    if DEBUG:
+        print("=== DATA SQL ===")
+        print(data_sql)
+
     result = await db.execute(text(data_sql), params)
     rows = result.mappings().all()
 
