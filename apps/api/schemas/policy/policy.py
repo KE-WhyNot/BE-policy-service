@@ -1,13 +1,27 @@
-from fastapi import APIRouter
+from pydantic import BaseModel
 
-router = APIRouter(tags=["policy"])
+class PolicyListResponse(BaseModel):
+    
+    # 상시 / 마감 / 예정
+    status: str
 
-@router.get(
-    "/policy",
-    response_model = PolicyListResponse,
-    responses = {
-        200: {"description": "정책 리스트 조회 성공"},
-        400: {"description": "잘못된 요청"},
-        500: {"description": "서버 오류"},
-    }
-)
+    # 카테고리 ("일자리")
+    category_large: str
+
+    # 🚨 제외 🚨 지역 ("전국 / 서울 / 경기 ...")
+    # region_large: str
+
+    # 정책명
+    title: str
+    
+    # 요약
+    summary_raw: str
+
+    # 신청기간
+    period_apply: str
+
+    # 키워드 ("#교육지원")
+    keyword: list[str] = []
+
+class PolicyListNotFoundResponse(BaseModel):
+    message: str = "No policies found matching the criteria"
