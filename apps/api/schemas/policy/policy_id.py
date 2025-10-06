@@ -1,210 +1,250 @@
-from datetime import date
-from pydantic import BaseModel
+from datetime import date, datetime
+from pydantic import BaseModel, field_serializer
+from typing import Optional, List, Dict
+import pytz
 
 
-class PolicyDetailResponse(BaseModel):
-    """정책 상세 조회 응답 스키마"""
-
-# 기본 정보 (최상단)
+# -----------------------------
+# 🧩 1️⃣ 기본 정보 (최상단)
+# -----------------------------
+class PolicyTop(BaseModel):
     # 정책분야(카테고리) - ex) 복지문화 
-    category_large: str | None = None
-        # core.policy_category.category_id
-        # -> master.category.id 조인
-        # -> if parent_id not null, master.category에서 id = parent_id 찾고 name 가져오기
-    
-    # 사업 신청기간 - ex) 상시 
-    status: str | None = None
-        # core.policy.status 반환
-        # TODO: apply_start, apply_end 값에 따라 동적으로 변경하는 로직 추가 필요 (DB)
+    category_large: Optional[str] = None
+    # core.policy_category.category_id
+    # -> master.category.id 조인
+    # -> if parent_id not null, master.category에서 id = parent_id 찾고 name 가져오기
+
+    # 사업 신청기간 상태 - ex) 상시, 마감, 예정
+    status: Optional[str] = None
+    # core.policy.status 반환
+    # ✅ apply_start, apply_end 값에 따라 update_policy_status.py 에서 동적으로 변경됨
 
     # 정책명
     title: str
-        # core.policy.title 반환
+    # core.policy.title 반환
 
     # 키워드 - ex) 교육지원, 맞춤형상담서비스
-    keyword: list[str] = []
-        # core.policy.id -> core.policy_keyword.policy_id 조인 (한 정책이 여러 키워드 가질 수 있음)
-        # core.policy_keyword 에서 keyword_id -> master.keyword.id 조인
+    keyword: List[str] = []
+    # core.policy.id -> core.policy_keyword.policy_id 조인
+    # -> master.keyword.id 조인 후 name 반환
 
     # AI 한줄요약
-    summary_ai: str | None = None 
-        # TODO: LLM api 처리 (elt)
+    summary_ai: Optional[str] = None
+    # TODO: LLM API 처리 (ETL 단계 요약 생성)
 
 
-# 한 눈에 보는 정책 요약 (Body 1)
+# -----------------------------
+# 🧾 2️⃣ 한 눈에 보는 정책 요약 (Body 1)
+# -----------------------------
+class PolicySummary(BaseModel):
     # 정책번호
-    id: str 
-        # core.policy.id 반환
+    id: str
+    # core.policy.id 반환
 
     # 정책분야(카테고리) - 대분류 + 중분류
+    category_full: Optional[str] = None
+    # "{대분류} - {소분류}" 형태로 반환
 
-    category_full: str | None = None 
-        # 대분류 : category_large 재사용
-        # 소분류 : core.policy_category.category_id -> master.category.id 조인 -> name 가져오기
-        # category_full 은 "{대분류} - {소분류}" 형태로 반환
-    
     # 정책 요약 (원본)
-    summary_raw: str | None = None 
-        # core.policy.summary_raw 반환
+    summary_raw: Optional[str] = None
+    # core.policy.summary_raw 반환
 
     # 지원 내용 (원본)
-    description_raw: str | None = None
-        # core.policy.description_raw 반환
+    description_raw: Optional[str] = None
+    # core.policy.description_raw 반환
 
     # 사업 운영 기간
-    # DONE: 컬럼 추가 (core.policy) - period_type (bizPrdSecd), period_start (bizPrdBgngYmd), period_end (bizPrdEndYmd), period_etc (bizPrdEtcCn)
-    # TODO: ✅✅ ELT 구현 (core.policy) - period_type (bizPrdSecd), period_start (bizPrdBgngYmd), period_end (bizPrdEndYmd), period_etc (bizPrdEtcCn)
-    # TODO: ✅✅ (core.policy) period_start, period_end : null값만 들어감 이슈 처리
-    period_biz: str | None = None
-        # 1. period_type 확인
-        # 2-1. 특정기간인 경우 -> {period_start} ~ {period_end} 반환
-        # 2-2. 상시인 경우 -> "상시" 반환
-        # 3. period_etc 가 있으면 -> "{위 2가지 결과} ({period_etc})" 형태로 반환
-    
-    # 사업 신청기간 - ex) "상시" or 날짜
-    # 컬럼 추가 완료 (core.policy) - apply_type (aplyPrdSeCd)
-    period_apply: str | None = None
-        # 1. apply_type 확인
-        # 2-1. 특정기간인 경우 -> {apply_start} ~ {apply_end} 반환
-        # 2-2. 상시인 경우 -> "상시" 반환
-        # 2-3. 마감인 경우 -> "마감" 반환
-    
+    period_biz: Optional[str] = None
+    # 1. period_type 확인
+    # 2. 특정기간 → {period_start} ~ {period_end}
+    # 3. 상시 → "상시"
+    # 4. period_etc 존재 시 → "{기간} ({period_etc})"
 
-# 신청자격
+    # 사업 신청기간
+    period_apply: Optional[str] = None
+    # apply_type에 따라:
+    # 1. 특정기간 → "{apply_start} ~ {apply_end}"
+    # 2. 상시 → "상시"
+    # 3. 마감 → "마감"
+
+    # 제거된 중복 필드들 (가공된 값으로 통합됨):
+    # apply_start, apply_end → period_apply로 통합
+    # period_start, period_end, period_etc → period_biz로 통합
+    # apply_type, period_type → 각각 period_apply, period_biz 생성 로직에 사용
+
+
+# -----------------------------
+# 🧍‍♀️ 3️⃣ 신청자격 (Eligibility)
+# -----------------------------
+class PolicyEligibility(BaseModel):
     # 연령
-    age: str | None = None
-        # 1. core.policy_eligibility.age_min 과 .age_max 확인
-        # 2-1. 둘 다 있으면 -> "{age_min}세 ~ {age_max}세" 형태로 반환
-        # 2-2. age_min만 있으면 -> "{age_min}세 이상" 형태
-        # 2-3. age_max만 있으면 -> "{age_max}세 이하" 형태
-        # 2-4. 둘 다 없으면 -> "제한없음" 반환
+    age: Optional[str] = None
+    # 1. age_min, age_max 확인
+    # 2. "{min}세 ~ {max}세", "{min}세 이상", "{max}세 이하", 없으면 "제한없음"
 
     # 거주지역
-    regions: str | None = None
-        # 1. core.policy.id -> core.policy_region.policy_id 조인 (한 정책이 여러 지역 가질 수 있음)
-        # 2. core.policy_region.region_id -> master.region.id 조인
-        # 3. master.region.full_name 들을 ", "로 연결한 문자열 반환
+    regions: Optional[str] = None
+    # core.policy_region.region_id -> master.region.full_name 조인
 
     # 소득
-    income: str | None = None
-        # 1. core.policy_eligibility.income_type 확인
-        # 2-1. "ANY" -> "무관"
-        # 2-2. "RANGE" -> core.policy_eligibility에서 "{income_min}만원 ~ {income_max}만원" 형태로 반환
-        # 2-3. "TEXT" -> core.policy_eligibility.income_text 반환
-        # 2-4. "UNKNOWN" -> "신청 사이트 내 확인" 반환
+    income: Optional[str] = None
+    # income_type 따라 "무관" / "금액 범위" / "텍스트" / "신청 사이트 내 확인"
 
-    # DONE: core.policy_eligibility에 다음 컬럼 추가 : 학력, 전공, 취업상태, 특화분야 제한여부 (restrict_education: true/false)
     # 학력
-    education: str | None = None
-        # 1. core.policy_eligibility.restrict_education 확인
-        # 2-1. false : "제한없음" 반환
-        # 2-2. true : core.policy.id -> core.policy_education.policy_id 조인 (한 정책이 여러 학력 가질 수 있음)
-        #          core.policy_education.education_id -> master.education.id 조인
-        #          master.education.name 들을 ", "로 연결한 문자열 반환
+    education: Optional[str] = None
+    # restrict_education=False → "제한없음"
+    # restrict_education=True → 관련 master.education.name 리스트
 
     # 전공
-    major: str | None = None
-        # 1. core.policy_eligibility.restrict_major 확인
-        # 2-1. false : "제한없음" 반환
-        # 2-2. true : core.policy.id -> core.policy_major.policy_id 조인 (한 정책이 여러 전공 가질 수 있음)
-        #          core.policy_major.major_id -> master.major.id 조인
-        #          master.major.name 들을 ", "로 연결한 문자열 반환
+    major: Optional[str] = None
+    # restrict_major=False → "제한없음"
+    # restrict_major=True → master.major.name 리스트
 
     # 취업상태
-    job_status: str | None = None
-        # 1. core.policy_eligibility.restrict_job_status 확인
-        # 2-1. false : "제한없음" 반환
-        # 2-2. true : core.policy.id -> core.policy_job_status.policy_id 조인 (한 정책이 여러 취업상태 가질 수 있음)
-        #          core.policy_job_status.job_status_id -> master.job_status.id 조인
-        #          master.job_status.name 들을 ", "로 연결한 문자열 반환
+    job_status: Optional[str] = None
+    # restrict_job_status=False → "제한없음"
+    # restrict_job_status=True → master.job_status.name 리스트
 
     # 특화분야
-    specialization: str | None = None
-        # 1. core.policy_eligibility.restrict_specialization 확인
-        # 2-1. false : "제한없음" 반환
-        # 2-2. true : core.policy.id -> core.policy_specialization.policy_id 조인 (한 정책이 여러 특화분야 가질 수 있음)
-        #          core.policy_specialization.specialization_id -> master.specialization.id 조인
-        #          master.specialization.name 들을 ", "로 연결한 문자열 반환
+    specialization: Optional[str] = None
+    # restrict_specialization=False → "제한없음"
+    # restrict_specialization=True → master.specialization.name 리스트
 
     # 추가사항
-    # DONE: DB 컬럼 추가 (addAplyQlfcCndCn -> eligibility_additional)
-    # TODO: ✅✅ elt 구현 (addAplyQlfcCndCn -> eligibility_additional)
-    eligibility_additional: str | None = None 
-        # core.policy_eligibility.eligibility_additional 반환
-        # null 이면 "없음" 반환
+    eligibility_additional: Optional[str] = None
+    # core.policy_eligibility.eligibility_additional (null→"없음")
 
     # 참여 제한 대상
-    # DONE: DB 컬럼 추가 (ptcpPrpTrgtCn -> eligibility_restrictive)
-    # TODO: ✅✅ elt 구현 (ptcpPrpTrgtCn -> eligibility_restrictive)
-    eligibility_restrictive: str | None = None
-        # core.policy_eligibility.eligibility_restrictive 반환
-        # null 이면 "없음" 반환
+    eligibility_restrictive: Optional[str] = None
+    # core.policy_eligibility.eligibility_restrictive (null→"없음")
 
-# 신청방법
+
+# -----------------------------
+# 📝 4️⃣ 신청방법 (Application)
+# -----------------------------
+class PolicyApplication(BaseModel):
     # 신청절차
-    # DONE: DB 컬럼 추가 (plcyAplyMthdCn -> application_process)
-    # TODO: ✅✅ elt 구현 (plcyAplyMthdCn -> application_process)
-    application_process: str | None = None
-        # core.policy.application_process 반환
+    application_process: Optional[str] = None
+    # core.policy.application_process 반환
 
     # 심사 및 발표
-    # DONE: DB 컬럼 추가  (srngMthdCn -> announcement)
-    # TODO: ✅✅ elt 구현 (srngMthdCn -> announcement)
-    announcement: str | None = None
-        # core.policy.announcement 반환
+    announcement: Optional[str] = None
+    # core.policy.announcement 반환
 
     # 신청 사이트
-    apply_url: str | None = None
-        # core.policy.aplyUrl 반환
+    apply_url: Optional[str] = None
+    # core.policy.apply_url 반환
 
     # 제출 서류
-    # DONE: DB 컬럼 추가 (sbmsnDcmntCn -> required_documents)
-    # TODO: ✅✅ elt 구현 (sbmsnDcmntCn -> required_documents)
-    required_documents: str | None = None
-        # core.policy.required_documents 반환
+    required_documents: Optional[str] = None
+    # core.policy.required_documents 반환
 
-# 기타
+
+# -----------------------------
+# 📎 5️⃣ 기타 (Etc)
+# -----------------------------
+class PolicyEtc(BaseModel):
     # 기타 정보
-    # DONE: DB 컬럼 추가 (etcMttrCn -> info_etc)
-    # TODO: ✅✅ elt 구현 (etcMttrCn -> info_etc)
-    info_etc: str | None = None
-        # core.policy.info_etc 반환
+    info_etc: Optional[str] = None
+    # core.policy.info_etc 반환
 
     # 주관 기관
-    supervising_org: str | None = None
-        # core.policy.supervising_org 반환
+    supervising_org: Optional[str] = None
+    # core.policy.supervising_org 반환
 
     # 운영 기관
-    operating_org: str | None = None
-        # core.policy.operating_org 반환
+    operating_org: Optional[str] = None
+    # core.policy.operating_org 반환
 
     # 참고 사이트 1
-    ref_url_1: str | None = None
-        # core.policy.ref_url_1 반환
+    ref_url_1: Optional[str] = None
+    # core.policy.ref_url_1 반환
 
     # 참고 사이트 2
-    ref_url_2: str | None = None
-        # core.policy.ref_url_2 반환
+    ref_url_2: Optional[str] = None
+    # core.policy.ref_url_2 반환
 
-# 정보 변경 내역
+
+# -----------------------------
+# 🧾 6️⃣ 추가 메타 정보 (Meta)
+# -----------------------------
+class PolicyMeta(BaseModel):
+    # 외부 소스
+    ext_source: Optional[str] = None
+    # core.policy.ext_source 반환
+
+    # 외부 ID
+    ext_id: Optional[str] = None
+    # core.policy.ext_id 반환
+
+    # 조회수
+    views: int = 0
+    # core.policy.views 반환
+
+    # 생성일시
+    created_at: Optional[datetime] = None
+    # core.policy.created_at 반환
+
+    # 수정일시
+    updated_at: Optional[datetime] = None
+    # core.policy.updated_at 반환
+
+    # 페이로드 (원본 JSON 데이터)
+    payload: Optional[Dict] = None
+    # core.policy.payload 반환
+
+    # 컨텐츠 해시
+    content_hash: Optional[str] = None
+    # core.policy.content_hash 반환
+
     # 최종 수정일
-    last_external_modified: date | None = None
-        # core.policy.last_external_modified 반환 (timestampz -> kst 적용)
+    last_external_modified: Optional[datetime] = None
+    # core.policy.last_external_modified 반환
 
     # 최초 등록일
-    # DONE: DB 컬럼 추가 (frstRegDt -> first_external_created)
-    # TODO: ✅✅ elt 구현 (frstRegDt -> first_external_created)
-    first_external_created: date | None = None 
-        # core.policy.first_external_created 반환 (timestampz -> kst 적용)
-    
+    first_external_created: Optional[datetime] = None 
+    # core.policy.first_external_created 반환
+
+    @field_serializer('created_at', 'updated_at', 'last_external_modified', 'first_external_created')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """datetime을 KST 시간대로 변환하고 분 단위까지만 표시"""
+        if dt is None:
+            return None
+        
+        # UTC timezone이 있는 경우 KST로 변환
+        if dt.tzinfo is not None:
+            kst = pytz.timezone('Asia/Seoul')
+            dt_kst = dt.astimezone(kst)
+        else:
+            # timezone이 없는 경우 UTC로 가정하고 KST로 변환
+            utc = pytz.timezone('UTC')
+            dt_utc = utc.localize(dt)
+            kst = pytz.timezone('Asia/Seoul')
+            dt_kst = dt_utc.astimezone(kst)
+        
+        # 분 단위까지만 표시 (초, 마이크로초 제거)
+        return dt_kst.strftime('%Y-%m-%d %H:%M')
+
+
+# -----------------------------
+# 🌟 최상위 응답 모델
+# -----------------------------
+class PolicyDetailResponse(BaseModel):
+    """정책 상세 조회 응답 스키마"""
+    top: PolicyTop
+    summary: PolicySummary
+    eligibility: PolicyEligibility
+    application: PolicyApplication
+    etc: PolicyEtc
+    meta: PolicyMeta
     
     class Config:
         from_attributes = True
-        json_encoders = {
-            date: lambda v: v.isoformat() if v else None
-        }
 
 
+# -----------------------------
+# 🚫 예외 응답 모델
+# -----------------------------
 class PolicyNotFoundResponse(BaseModel):
     """정책을 찾을 수 없을 때 응답 스키마"""
     message: str = "Policy not found"

@@ -1,12 +1,13 @@
 from fastapi import FastAPI
 from apps.api.core.cors import setup_cors
-from apps.api.routers import health, master, policy_id
+from apps.api.routers import health, master, policy, policy_id
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Policy Service", version="1.0.0")
     setup_cors(app)
     app.include_router(health.router, prefix="/api")
     app.include_router(master.router, prefix="/api")
+    app.include_router(policy.router, prefix="/api")
     app.include_router(policy_id.router, prefix="/api")
     return app
 
