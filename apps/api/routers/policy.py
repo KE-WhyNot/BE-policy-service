@@ -28,6 +28,9 @@ async def get_policy_list(
     # TODO: full-text search 추후 구현
     search_word: str | None = Query(default=None, description="검색어 : ❌ full-text search 아직 미구현 ❌ "),
 
+# 디버그용
+    policy_id: str | None = Query(default=None, description="💻 디버그용 정책 ID"),
+
 # 정책 분야
     # 카테고리(소분류) 체크박스
     # 받은 name값과 일치하는 master.category의 name으로 master.category의 id 조회 -> core.policy_category에서 category_id로 policy_id 조회
@@ -105,6 +108,11 @@ async def get_policy_list(
     joins = []
     where_conditions = []
     params = {}
+    
+    # 디버그용 policy_id 필터
+    if policy_id:
+        where_conditions.append("p.id = :policy_id")
+        params["policy_id"] = policy_id
     
     # 키워드 필터
     if keyword:
@@ -196,6 +204,8 @@ async def get_policy_list(
     SELECT DISTINCT 
         p.id,
         p.status,
+        p.apply_type,
+        p.apply_end,
         STRING_AGG(DISTINCT c.name, ', ') as category_small,
         (SELECT cl_parent.name 
          FROM master.category c_first 
@@ -212,8 +222,8 @@ async def get_policy_list(
         p.title,
         p.summary_raw,
         CASE 
-            WHEN p.apply_type = 'ALWAYS_OPEN' THEN '상시모집'
-            WHEN p.apply_type = 'CLOSED' THEN '모집마감'
+            WHEN p.apply_type = 'ALWAYS_OPEN' THEN '상시'
+            WHEN p.apply_type = 'CLOSED' THEN '마감'
             WHEN p.apply_type = 'PERIODIC' AND p.apply_start IS NOT NULL AND p.apply_end IS NOT NULL 
                 THEN CONCAT(TO_CHAR(p.apply_start, 'YYYY-MM-DD'), ' ~ ', TO_CHAR(p.apply_end, 'YYYY-MM-DD'))
             WHEN p.apply_type = 'PERIODIC' AND p.apply_start IS NOT NULL AND p.apply_end IS NULL 
@@ -232,8 +242,8 @@ async def get_policy_list(
         STRING_AGG(DISTINCT s.name, ', ') as specialization
     {all_joins}
     {where_clause}
-    GROUP BY p.id, p.status, p.title, p.summary_raw, 
-             p.apply_type, p.apply_start, p.apply_end
+    GROUP BY p.id, p.status, p.apply_type, p.apply_end, p.title, p.summary_raw, 
+             p.apply_start
     ORDER BY p.id
     """
 
@@ -268,13 +278,35 @@ async def get_policy_list(
                 return [v.strip() for v in value.split(', ') if v.strip()]
             return []
         
+        # status 파싱 로직
+        def parse_status(status, apply_type, apply_end):
+            if status == 'CLOSED':
+                return "마감"
+            elif status == 'OPEN':
+                if apply_type == 'ALWAYS_OPEN':
+                    return "상시"
+                elif apply_type == 'PERIODIC' and apply_end:
+                    from datetime import datetime
+                    today = datetime.now().date()
+                    d_day = (apply_end - today).days
+                    return f"마감 D-{d_day}"
+                else:
+                    return "상시"  # apply_end가 없는 경우 상시로 처리
+            elif status == 'UNKNOWN':
+                return "UNKNOWN"
+            elif status == 'UPCOMING':
+                return "오픈예정"
+            else:
+                return status  # 기본값
+        
         policy_list_response = PolicyListResponse(
-            status=item["status"],
-            category_large=item["category_large"] or "",  # 문자열로 반환
+            policy_id=item["id"],
+            status=parse_status(item["status"], item["apply_type"], item["apply_end"]),
+            category_large=item["category_large"] or "",
             title=item["title"],
             summary_raw=item["summary_raw"],
             period_apply=item["period_apply"],
-            keyword=str_to_list(item["keyword"])  # 키워드도 리스트로 변환
+            keyword=str_to_list(item["keyword"])
         )
         policy_list.append(policy_list_response)
 

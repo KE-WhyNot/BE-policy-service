@@ -1,6 +1,8 @@
 from pydantic import BaseModel
 
 class PolicyListResponse(BaseModel):
+    # 정책 ID
+    policy_id: int
     
     # 상시 / 마감 / 예정
     status: str
