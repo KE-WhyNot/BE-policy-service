@@ -12,8 +12,9 @@ STG(통합) -> CORE 업서트 + 옵션 세트 해시 계산 + 우대조건 분�
 환경:
   PG_DSN_FIN = postgresql+psycopg://user:pass@host:5432/db
 실행:
-  python stg_to_core.py [all|deposit|saving] [--skip-gemini]
+  python stg_to_core.py [all|deposit|saving] [--skip-gemini] [--debug]
 """
+DEBUG = False
 
 import os, sys, logging, json
 from typing import Tuple, List, Optional
@@ -22,6 +23,7 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from tqdm.auto import tqdm
 
 # Gemini 관련 import (선택적)
 try:
@@ -395,7 +397,8 @@ def analyze_special_condition(spcl_cnd: str, max_retries: int = 3) -> Tuple[Opti
     
     # "없음" 또는 "-"인 경우 모든 조건을 false로 설정
     if spcl_cnd.strip() in ("없음", "-"):
-        log.info(f"우대조건이 '{spcl_cnd.strip()}'이므로 모든 조건을 false로 설정")
+        if DEBUG:
+            log.info(f"우대조건이 '{spcl_cnd.strip()}'이므로 모든 조건을 false로 설정")
         return SpecialCondition(), True
     
     # 3회 재시도 로직
@@ -433,14 +436,17 @@ def analyze_special_condition(spcl_cnd: str, max_retries: int = 3) -> Tuple[Opti
             return condition, True
             
         except Exception as e:
-            log.error(f"Gemini API 분석 실패 (시도 {attempt + 1}/{max_retries}): {e}")
-            log.error(f"텍스트: {spcl_cnd[:100]}...")
+            if DEBUG:
+                log.error(f"Gemini API 분석 실패 (시도 {attempt + 1}/{max_retries}): {e}")
+                log.error(f"텍스트: {spcl_cnd[:100]}...")
             
             if attempt == max_retries - 1:  # 마지막 시도
-                log.error(f"Gemini API 분석 최종 실패 - 모든 조건을 false로 설정하고 error=true")
+                if DEBUG:
+                    log.error(f"Gemini API 분석 최종 실패 - 모든 조건을 false로 설정하고 error=true")
                 return SpecialCondition(), False
             else:
-                log.info(f"재시도 중... ({attempt + 2}/{max_retries})")
+                if DEBUG:
+                    log.info(f"재시도 중... ({attempt + 2}/{max_retries})")
     
     # 이 부분은 도달하지 않아야 함
     return SpecialCondition(), False
@@ -521,7 +527,8 @@ def save_join_ways(conn, product_id: int, join_way: str) -> None:
                 "join_way": way
             })
         
-        log.debug(f"가입방법 저장 완료: product_id={product_id}, join_ways={join_ways}")
+        if DEBUG:
+            log.debug(f"가입방법 저장 완료: product_id={product_id}, join_ways={join_ways}")
 
 def process_join_ways_for_products(conn, changed_product_ids: List[int]) -> int:
     """변경된 상품들의 가입방법 처리"""
@@ -541,17 +548,22 @@ def process_join_ways_for_products(conn, changed_product_ids: List[int]) -> int:
     
     processed_count = 0
     
-    for product in products:
+    # Progress bar for join way processing
+    progress_bar = tqdm(products, desc="가입방법 처리", disable=False)
+    
+    for product in progress_bar:
         product_id = product['id']
         fin_prdt_nm = product['fin_prdt_nm']
         join_way = product['join_way']
         
-        log.debug(f"가입방법 처리 중: {fin_prdt_nm}, join_way: {join_way}")
+        if DEBUG:
+            log.debug(f"가입방법 처리 중: {fin_prdt_nm}, join_way: {join_way}")
         
         save_join_ways(conn, product_id, join_way)
         processed_count += 1
     
-    log.info(f"가입방법 처리 완료: {processed_count}개 상품")
+    if DEBUG:
+        log.info(f"가입방법 처리 완료: {processed_count}개 상품")
     return processed_count
 
 def analyze_changed_products(conn, changed_product_ids: List[int], skip_gemini: bool = False) -> Tuple[int, int]:
@@ -573,19 +585,24 @@ def analyze_changed_products(conn, changed_product_ids: List[int], skip_gemini: 
     success_count = 0
     failure_count = 0
     
-    for product in products:
+    # Progress bar for Gemini processing
+    progress_bar = tqdm(products, desc="Gemini 우대조건 분석", disable=False)
+    
+    for product in progress_bar:
         product_id = product['id']
         fin_prdt_nm = product['fin_prdt_nm']
         spcl_cnd = product['spcl_cnd']
         
-        log.info(f"우대조건 분석 중: {fin_prdt_nm}")
+        if DEBUG:
+            log.info(f"우대조건 분석 중: {fin_prdt_nm}")
         
         # spcl_cnd가 없거나 빈 문자열인 경우 모두 false로 처리
         if not spcl_cnd or spcl_cnd.strip() == "":
             condition = SpecialCondition()
             save_special_condition(conn, product_id, condition, error=False)
             success_count += 1
-            log.info(f"✓ 우대조건 없음 - 모두 false로 설정: {product_id}")
+            if DEBUG:
+                log.info(f"✓ 우대조건 없음 - 모두 false로 설정: {product_id}")
             continue
         
         condition, is_success = analyze_special_condition(spcl_cnd)
@@ -594,14 +611,17 @@ def analyze_changed_products(conn, changed_product_ids: List[int], skip_gemini: 
             save_special_condition(conn, product_id, condition, error=not is_success)
             if is_success:
                 success_count += 1
-                log.info(f"✓ 우대조건 분석 완료: {product_id}")
+                if DEBUG:
+                    log.info(f"✓ 우대조건 분석 완료: {product_id}")
             else:
                 failure_count += 1
-                log.warning(f"⚠ 우대조건 분석 실패하여 기본값 적용 (error=true): {product_id}")
+                if DEBUG:
+                    log.warning(f"⚠ 우대조건 분석 실패하여 기본값 적용 (error=true): {product_id}")
         else:
             # 이 케이스는 발생하지 않아야 함 (함수 수정으로 인해)
             failure_count += 1
-            log.error(f"✗ 우대조건 분석 실패: {product_id}")
+            if DEBUG:
+                log.error(f"✗ 우대조건 분석 실패: {product_id}")
     
     return success_count, failure_count
 
@@ -640,36 +660,56 @@ def upsert_for_type(conn, product_type: str, skip_gemini: bool = False) -> Tuple
 
 def run(which: str, skip_gemini: bool = False) -> None:
     if which not in ("all", "deposit", "saving"):
-        raise SystemExit("Usage: python stg_to_core.py [all|deposit|saving] [--skip-gemini]")
+        print("Usage: python stg_to_core.py [all|deposit|saving] [--skip-gemini] [--debug]")
+        raise SystemExit(1)
 
     engine: Engine = create_engine(PG_DSN_FIN, future=True)
+    print("✅ Database connection established")
 
     types = ("deposit", "saving") if which == "all" else (which,)
     total_ins = total_cls = total_tch = total_join = total_gem_suc = total_gem_fail = 0
 
     for t in types:
         pt = PRODUCT_TYPES[t]
-        log.info("UPSERT start | product_type=%s", pt)
+        print(f"✅ Processing {pt} products...")
+        
         with engine.begin() as conn:
+            print(f"✅ Step 1: Base product upsert for {pt}")
+            print(f"✅ Step 2: Option upsert for {pt}")
+            print(f"✅ Step 3: Option set hash calculation for {pt}")
+            print(f"✅ Step 4: Join way processing for {pt}")
+            if not skip_gemini:
+                print(f"✅ Step 5: Gemini special condition analysis for {pt}")
+            
             c, i, h, j, gs, gf = upsert_for_type(conn, pt, skip_gemini)
+            
         total_cls += c
         total_ins += i
         total_tch += h
         total_join += j
         total_gem_suc += gs
         total_gem_fail += gf
-        log.info("UPSERT done | type=%s | opt_closed=%d, opt_inserted=%d, opt_touched=%d | join_way_processed=%d | gemini_success=%d, gemini_failed=%d", 
-                 pt, c, i, h, j, gs, gf)
+        
+        print(f"✅ {pt} processing completed | opt_closed={c}, opt_inserted={i}, opt_touched={h} | join_way_processed={j} | gemini_success={gs}, gemini_failed={gf}")
 
-    log.info("ALL DONE | opt_closed=%d, opt_inserted=%d, opt_touched=%d | join_way_processed=%d | gemini_success=%d, gemini_failed=%d", 
-             total_cls, total_ins, total_tch, total_join, total_gem_suc, total_gem_fail)
+    print(f"✅ ALL PROCESSING COMPLETED | opt_closed={total_cls}, opt_inserted={total_ins}, opt_touched={total_tch} | join_way_processed={total_join} | gemini_success={total_gem_suc}, gemini_failed={total_gem_fail}")
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    arg = args[0] if args else "all"
+    
+    # Extract flags
     skip_gemini = "--skip-gemini" in args
+    debug_mode = "--debug" in args
+    
+    # Remove flags to get positional arguments
+    positional_args = [arg for arg in args if not arg.startswith('--')]
+    arg = positional_args[0] if positional_args else "all"
+    
+    if debug_mode:
+        DEBUG = True
+        print("🐛 DEBUG mode enabled")
     
     if skip_gemini:
-        log.info("Gemini 분석을 건너뜁니다")
+        print("⚠️  Gemini 분석을 건너뜁니다")
     
     run(arg, skip_gemini)
