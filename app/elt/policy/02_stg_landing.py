@@ -52,29 +52,6 @@ logging.basicConfig(
 )
 log = logging.getLogger("stg_landing_from_raw")
 
-# ---------- Bootstrap DDL (idempotent) ----------
-BOOTSTRAP_SQL = """
-create schema if not exists stg;
-
-create table if not exists stg.youthpolicy_landing (
-  policy_id     text        not null,
-  record_hash   char(64)    not null,
-  raw_json      jsonb       not null,
-  ingested_at   timestamptz not null default now(),
-  raw_ingest_id uuid        not null,
-  page_no       int         not null,
-  primary key (policy_id, record_hash)
-);
-create index if not exists idx_stg_landing_raw on stg.youthpolicy_landing(raw_ingest_id);
-create index if not exists idx_stg_landing_policy on stg.youthpolicy_landing(policy_id);
-"""
-
-def bootstrap(conn: psycopg.Connection) -> None:
-    with conn.cursor() as cur:
-        cur.execute(BOOTSTRAP_SQL)
-    conn.commit()
-    log.info("STG bootstrap complete (landing ready)")
-
 # ---------- Helpers ----------
 
 # page 메타(혹시 item에 섞여 들어와도 방어)
@@ -241,7 +218,6 @@ def upsert_landing(conn: psycopg.Connection, pages: List[Dict[str, Any]]) -> Non
 def main() -> None:
     log.info("STG landing transform start")
     with psycopg.connect(PG_DSN) as conn:
-        bootstrap(conn)
         pages = load_raw_pages(conn)
         if not pages:
             log.info("No RAW pages to process. Done.")

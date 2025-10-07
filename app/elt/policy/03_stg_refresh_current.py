@@ -46,26 +46,6 @@ logging.basicConfig(
 )
 log = logging.getLogger("stg_current_refresh")
 
-# ------------ Bootstrap ------------
-BOOTSTRAP_SQL = """
-create schema if not exists stg;
-
-create table if not exists stg.youthpolicy_current (
-  policy_id     text        primary key,
-  record_hash   char(64)    not null,
-  first_seen_at timestamptz not null default now(),
-  last_seen_at  timestamptz not null default now(),
-  is_active     boolean     not null default true
-);
-create index if not exists idx_stg_current_hash on stg.youthpolicy_current(record_hash);
-"""
-
-def bootstrap(conn: psycopg.Connection) -> None:
-    with conn.cursor() as cur:
-        cur.execute(BOOTSTRAP_SQL)
-    conn.commit()
-    log.info("Bootstrap: stg.youthpolicy_current ready")
-
 # ------------ Core ------------
 def refresh_current(conn: psycopg.Connection) -> None:
     cutoff_ts = None
@@ -155,7 +135,6 @@ def refresh_current(conn: psycopg.Connection) -> None:
 def main() -> None:
     log.info("STG current refresh start (lookback=%sh, inactive_after=%sd)", LOOKBACK_HOURS, INACTIVE_AFTER_DAYS)
     with psycopg.connect(PG_DSN) as conn:
-        bootstrap(conn)
         refresh_current(conn)
     log.info("STG current refresh complete")
 

@@ -105,45 +105,8 @@ def extract_option_records(page_payload: Dict[str, Any]) -> List[Dict[str, Any]]
     return out
 
 # -----------------------------
-# DDL (멱등)
+# SQL 쿼리
 # -----------------------------
-DDL = """
-CREATE SCHEMA IF NOT EXISTS stg;
-
-CREATE TABLE IF NOT EXISTS stg.finproduct_option_landing (
-  run_ts            TIMESTAMPTZ NOT NULL DEFAULT now(),
-  product_type      TEXT        NOT NULL CHECK (product_type IN ('DEPOSIT','SAVING')),
-  ext_source        TEXT        NOT NULL,  -- 'finlife_deposit' | 'finlife_saving'
-  fin_prdt_cd       TEXT        NOT NULL,  -- 외부 상품코드
-  payload           JSONB       NOT NULL,  -- 1 옵션 원본(JSON)
-  content_hash      TEXT        NOT NULL,
-
-  -- 생성 컬럼(조회/정렬/가독성)
-  dcls_month        TEXT    GENERATED ALWAYS AS ((payload->>'dcls_month')) STORED,
-  save_trm          INTEGER GENERATED ALWAYS AS (NULLIF(payload->>'save_trm','')::int) STORED,
-  intr_rate_type    TEXT    GENERATED ALWAYS AS ((payload->>'intr_rate_type')) STORED,
-  intr_rate_type_nm TEXT    GENERATED ALWAYS AS ((payload->>'intr_rate_type_nm')) STORED,
-  intr_rate         NUMERIC GENERATED ALWAYS AS (NULLIF(payload->>'intr_rate','')::numeric) STORED,
-  intr_rate2        NUMERIC GENERATED ALWAYS AS (NULLIF(payload->>'intr_rate2','')::numeric) STORED,
-  rsrv_type         TEXT    GENERATED ALWAYS AS ((payload->>'rsrv_type')) STORED,
-  rsrv_type_nm      TEXT    GENERATED ALWAYS AS ((payload->>'rsrv_type_nm')) STORED
-);
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_indexes
-    WHERE schemaname = 'stg' AND indexname = 'finproduct_option_landing_uq'
-  ) THEN
-    CREATE UNIQUE INDEX finproduct_option_landing_uq
-      ON stg.finproduct_option_landing (product_type, ext_source, fin_prdt_cd, content_hash);
-  END IF;
-END$$;
-
-CREATE INDEX IF NOT EXISTS finproduct_option_landing_key
-  ON stg.finproduct_option_landing (product_type, fin_prdt_cd, dcls_month, save_trm, intr_rate_type, rsrv_type);
-"""
-
 INSERT_SQL = text("""
 INSERT INTO stg.finproduct_option_landing (
   product_type, ext_source, fin_prdt_cd, payload, content_hash
@@ -156,9 +119,6 @@ ON CONFLICT DO NOTHING
 # -----------------------------
 # 실행
 # -----------------------------
-def bootstrap(engine: Engine) -> None:
-    with engine.begin() as conn:
-        conn.execute(text(DDL))
 
 def process_one_type(engine: Engine, key: str) -> tuple[int, int]:
     meta = PRODUCTS[key]
@@ -208,8 +168,6 @@ def run(which: str) -> None:
         raise SystemExit("Usage: python stg_option.py [all|deposit|saving]")
 
     engine = create_engine(PG_DSN_FIN, future=True)
-
-    bootstrap(engine)
 
     total_pages = 0
     total_rows  = 0

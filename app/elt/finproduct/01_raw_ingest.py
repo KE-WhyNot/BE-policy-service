@@ -29,9 +29,9 @@ def env_int(name: str, default: int) -> int:
     return int(v) if v not in (None, "") else default
 
 PG_DSN_FIN           = env_str("PG_DSN_FIN")
-API_KEY          = env_str("API_KEY")
-BASE_URL_DEPOSIT = env_str("BASE_URL_DEPOSIT")
-BASE_URL_SAVING  = env_str("BASE_URL_SAVING")
+API_KEY              = env_str("API_KEY_FIN")
+BASE_URL_DEPOSIT     = env_str("BASE_URL_DEPOSIT")
+BASE_URL_SAVING      = env_str("BASE_URL_SAVING")
 
 START_PAGE   = env_int("START_PAGE", 1)
 END_PAGE     = env_int("END_PAGE", 0)         # 0이면 끝까지
@@ -65,87 +65,6 @@ def test_connection(engine: Engine) -> None:
 
 engine = get_engine()
 test_connection(engine)
-
-# -------------------------
-# 부트스트랩 (스키마/테이블/컬럼/제약/인덱스 + 기존 데이터 타입 백필)
-# -------------------------
-BOOTSTRAP_SQL = """
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE SCHEMA IF NOT EXISTS raw;
-
-CREATE TABLE IF NOT EXISTS raw.finproduct_pages (
-    ingest_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    ingested_at     timestamptz NOT NULL DEFAULT now(),
-    /* NEW */ product_type   text NULL,
-    now_page_no     int NOT NULL,
-    max_page_no     int,
-    base_url        text NOT NULL,
-    query_params    jsonb NOT NULL,
-    http_status     int NOT NULL,
-    payload         jsonb NOT NULL
-);
-
-/* 기존 테이블에도 컬럼/제약/인덱스 보강 (멱등) */
-ALTER TABLE raw.finproduct_pages
-  ADD COLUMN IF NOT EXISTS product_type text;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.table_constraints
-    WHERE table_schema='raw'
-      AND table_name='finproduct_pages'
-      AND constraint_type='CHECK'
-      AND constraint_name='finproduct_pages_product_type_check'
-  ) THEN
-    ALTER TABLE raw.finproduct_pages
-      ADD CONSTRAINT finproduct_pages_product_type_check
-      CHECK (product_type IS NULL OR product_type IN ('DEPOSIT','SAVING'));
-  END IF;
-END$$;
-
-CREATE INDEX IF NOT EXISTS idx_finproduct_pages_type
-  ON raw.finproduct_pages(product_type);
-
-CREATE INDEX IF NOT EXISTS idx_finproduct_pages_ingested_at
-  ON raw.finproduct_pages(ingested_at);
-"""
-
-def bootstrap(conn: Connection) -> None:
-    conn.execute(text(BOOTSTRAP_SQL))
-    conn.commit()
-    log.info("Bootstrap completed")
-
-def backfill_product_type(conn: Connection) -> None:
-    """
-    기존 행(product_type IS NULL)에 대해 payload를 보고 분류:
-      - optionList 내에 rsrv_type 키가 하나라도 있으면 SAVING
-      - 그 외는 DEPOSIT
-    """
-    # SAVING 판별
-    conn.execute(text("""
-        UPDATE raw.finproduct_pages r
-        SET product_type = 'SAVING'
-        WHERE r.product_type IS DISTINCT FROM 'SAVING'
-          AND r.product_type IS NULL
-          AND EXISTS (
-            SELECT 1
-            FROM jsonb_array_elements(COALESCE(r.payload->'result'->'optionList','[]'::jsonb)) AS e
-            WHERE e ? 'rsrv_type'
-          );
-    """))
-    # 나머지(여전히 NULL)는 DEPOSIT으로
-    conn.execute(text("""
-        UPDATE raw.finproduct_pages
-        SET product_type = 'DEPOSIT'
-        WHERE product_type IS NULL;
-    """))
-    conn.commit()
-    log.info("Backfilled product_type for existing RAW rows")
-
-with engine.connect() as conn:
-    bootstrap(conn)
-    backfill_product_type(conn)
 
 # -------------------------
 # HTTP 호출

@@ -68,34 +68,6 @@ log = logging.getLogger("raw_ingest")
 # -------------------------
 # DB 부트스트랩 (idempotent)
 # -------------------------
-BOOTSTRAP_SQL = """
-create extension if not exists pgcrypto;
-
-create schema if not exists raw;
-
-create table if not exists raw.youthpolicy_pages (
-  ingest_id    uuid primary key default gen_random_uuid(),
-  ingested_at  timestamptz not null default now(),
-  page_no      int not null,
-  page_size    int,
-  base_url     text not null,
-  query_params jsonb not null,
-  http_status  int not null,
-  payload      jsonb not null
-);
-
--- 조회 편의 인덱스
-create index if not exists idx_raw_yp_pages_time on raw.youthpolicy_pages(ingested_at desc);
-create index if not exists idx_raw_yp_pages_page on raw.youthpolicy_pages(page_no);
-"""
-
-def bootstrap(conn: psycopg.Connection) -> None:
-    with conn.cursor() as cur:
-        cur.execute(BOOTSTRAP_SQL)
-    conn.commit()
-    log.info("DB bootstrap completed (raw.youthpolicy_pages ready)")
-
-# -------------------------
 # HTTP 호출
 # -------------------------
 class ApiError(Exception):
@@ -168,8 +140,6 @@ def main() -> None:
     inserted_rows = 0
 
     with psycopg.connect(PG_DSN, row_factory=tuple_row) as conn:
-        bootstrap(conn)
-
         # 트랜잭션: 각 페이지 단위로 커밋(대용량에서도 메모리 안정)
         with httpx.Client() as cli:
             page = max(1, START_PAGE)

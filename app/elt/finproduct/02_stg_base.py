@@ -99,45 +99,8 @@ def extract_base_records(page_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 # -----------------------------
-# DDL (멱등)
+# SQL 쿼리
 # -----------------------------
-DDL = """
-CREATE SCHEMA IF NOT EXISTS stg;
-
-CREATE TABLE IF NOT EXISTS stg.finproduct_base_landing (
-  run_ts          TIMESTAMPTZ NOT NULL DEFAULT now(),
-  product_type    TEXT        NOT NULL CHECK (product_type IN ('DEPOSIT','SAVING')),
-  ext_source      TEXT        NOT NULL,  -- 'finlife_deposit' | 'finlife_saving'
-  fin_prdt_cd     TEXT        NOT NULL,  -- 외부 상품코드
-  payload         JSONB       NOT NULL,  -- 1 상품 원본(JSON)
-  content_hash    TEXT        NOT NULL,
-
-  -- 생성 컬럼들(조회/정렬/가독성용)
-  dcls_month      TEXT GENERATED ALWAYS AS ((payload->>'dcls_month')) STORED,
-  fin_prdt_nm     TEXT GENERATED ALWAYS AS ((payload->>'fin_prdt_nm')) STORED,
-  fin_co_no       TEXT GENERATED ALWAYS AS ((payload->>'fin_co_no')) STORED,
-  kor_co_nm       TEXT GENERATED ALWAYS AS ((payload->>'kor_co_nm')) STORED,
-
-  -- saving 전용(적립 유형). deposit이면 NULL
-  rsrv_type       TEXT GENERATED ALWAYS AS ((payload->>'rsrv_type')) STORED,
-  rsrv_type_nm    TEXT GENERATED ALWAYS AS ((payload->>'rsrv_type_nm')) STORED
-);
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_indexes
-    WHERE schemaname = 'stg' AND indexname = 'deposit_base_landing_uq'
-  ) THEN
-    CREATE UNIQUE INDEX deposit_base_landing_uq
-      ON stg.finproduct_base_landing (product_type, ext_source, fin_prdt_cd, content_hash);
-  END IF;
-END$$;
-
-CREATE INDEX IF NOT EXISTS deposit_base_landing_key
-  ON stg.finproduct_base_landing (product_type, fin_prdt_cd, dcls_month);
-"""
-
 INSERT_SQL = text("""
 INSERT INTO stg.finproduct_base_landing (
   product_type, ext_source, fin_prdt_cd, payload, content_hash
@@ -150,9 +113,6 @@ ON CONFLICT DO NOTHING
 # -----------------------------
 # 실행
 # -----------------------------
-def bootstrap(engine: Engine) -> None:
-    with engine.begin() as conn:
-        conn.execute(text(DDL))
 
 def process_one_type(engine: Engine, key: str) -> tuple[int, int]:
     meta = PRODUCTS[key]
@@ -204,8 +164,6 @@ def run(which: str) -> None:
 
     # SQLAlchemy Engine
     engine = create_engine(PG_DSN_FIN, future=True)
-
-    bootstrap(engine)
 
     total_pages = 0
     total_rows  = 0
