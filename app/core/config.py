@@ -9,10 +9,8 @@ class Settings(BaseSettings):
     app_env: str = "dev"
 
     # 데이터베이스 (비동기용)
-    pg_dsn_async: str
-
-    # Redis 등 추가 리소스
-    redis_url: Optional[str] = None
+    pg_dsn_async: str # youth_policy
+    pg_dsn_async_fin: str # finproduct
 
     # CORS 허용 도메인
     cors_origins: List[str] = []
