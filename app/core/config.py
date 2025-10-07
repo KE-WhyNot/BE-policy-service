@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     # CORS 허용 도메인
     cors_origins: List[str] = []
 
+    ### 참고 : FAST API 실행 시에만 config.py에서 직접 로드, ELT에서는 dotenv에서 직접 로드됨. ###
     # 추가적인 환경 변수는 무시 (예: PG_DSN, DATABASE_URL, ETL_SOURCE 등)
     model_config = SettingsConfigDict(
         env_file=".env",

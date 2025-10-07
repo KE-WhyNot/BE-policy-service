@@ -1,7 +1,7 @@
 # stg_to_core.py
 from __future__ import annotations
 """
-STG(통합) -> CORE 업서트 + 옵션 세트 해시 계산
+STG(통합) -> CORE 업서트 + 옵션 세트 해시 계산 + 우대조건 분석
 
 전제:
   - STG(base):   stg.finproduct_base_landing
@@ -12,15 +12,24 @@ STG(통합) -> CORE 업서트 + 옵션 세트 해시 계산
 환경:
   PG_DSN_FIN = postgresql+psycopg://user:pass@host:5432/db
 실행:
-  python stg_to_core.py [all|deposit|saving]
+  python stg_to_core.py [all|deposit|saving] [--skip-gemini]
 """
 
-import os, sys, logging
-from typing import Tuple
+import os, sys, logging, json
+from typing import Tuple, List, Optional
+from dataclasses import dataclass
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+
+# Gemini 관련 import (선택적)
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    genai = None
 
 load_dotenv()
 log = logging.getLogger("stg_to_core")
@@ -34,10 +43,27 @@ def env_str(name: str, default: str | None=None) -> str:
 
 PG_DSN_FIN = env_str("PG_DSN_FIN")
 
+# Gemini 설정 (선택적)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_AVAILABLE and GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here":
+    genai.configure(api_key=GEMINI_API_KEY)
+
 PRODUCT_TYPES = {
     "deposit": "DEPOSIT",
     "saving":  "SAVING",
 }
+
+@dataclass
+class SpecialCondition:
+    is_non_face_to_face: bool = False
+    is_bank_app: bool = False
+    is_salary_linked: bool = False
+    is_pension_linked: bool = False
+    is_utility_linked: bool = False
+    is_card_usage: bool = False
+    is_first_transaction: bool = False
+    is_checking_account: bool = False
+    is_redeposit: bool = False
 
 # ------------------------
 # BOOTSTRAP (멱등)
@@ -136,10 +162,41 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_option_current
 
 CREATE INDEX IF NOT EXISTS idx_option_product
   ON core.product_option(product_id, is_current);
+
+-- 우대조건 테이블
+CREATE TABLE IF NOT EXISTS core.product_special_condition (
+    id                   SERIAL PRIMARY KEY,
+    product_id           BIGINT NOT NULL REFERENCES core.product(id) ON DELETE CASCADE,
+    is_non_face_to_face  BOOLEAN DEFAULT FALSE,
+    is_bank_app          BOOLEAN DEFAULT FALSE,
+    is_salary_linked     BOOLEAN DEFAULT FALSE,
+    is_pension_linked    BOOLEAN DEFAULT FALSE,
+    is_utility_linked    BOOLEAN DEFAULT FALSE,
+    is_card_usage        BOOLEAN DEFAULT FALSE,
+    is_first_transaction BOOLEAN DEFAULT FALSE,
+    is_checking_account  BOOLEAN DEFAULT FALSE,
+    is_redeposit         BOOLEAN DEFAULT FALSE,
+    created_at           TIMESTAMPTZ DEFAULT now(),
+    updated_at           TIMESTAMPTZ DEFAULT now()
+);
+
+COMMENT ON TABLE core.product_special_condition IS '예·적금 상품 우대조건 테이블';
+COMMENT ON COLUMN core.product_special_condition.is_non_face_to_face IS '비대면가입';
+COMMENT ON COLUMN core.product_special_condition.is_bank_app IS '은행앱사용';
+COMMENT ON COLUMN core.product_special_condition.is_salary_linked IS '급여연동';
+COMMENT ON COLUMN core.product_special_condition.is_pension_linked IS '연금';
+COMMENT ON COLUMN core.product_special_condition.is_utility_linked IS '공과금연동';
+COMMENT ON COLUMN core.product_special_condition.is_card_usage IS '카드사용';
+COMMENT ON COLUMN core.product_special_condition.is_first_transaction IS '첫거래';
+COMMENT ON COLUMN core.product_special_condition.is_checking_account IS '입출금통장';
+COMMENT ON COLUMN core.product_special_condition.is_redeposit IS '재예치';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_product_special_condition
+    ON core.product_special_condition(product_id);
 """
 
 # ------------------------
-# BASE 업서트
+# BASE 업서트 (변경 추적 포함)
 # ------------------------
 BASE_CLOSE_SQL = """
 WITH candidates AS (
@@ -153,7 +210,7 @@ WITH candidates AS (
   WHERE b.product_type = :product_type
 ),
 to_close AS (
-  SELECT p.id
+  SELECT p.id, p.ext_id, p.fin_prdt_nm
   FROM core.product p
   JOIN candidates c
     ON c.rn = 1
@@ -167,7 +224,7 @@ UPDATE core.product p
 SET is_current = FALSE, valid_to_ts = now(), updated_at = now()
 FROM to_close x
 WHERE p.id = x.id
-RETURNING p.id;
+RETURNING p.id, p.ext_id, p.fin_prdt_nm;
 """
 
 BASE_INSERT_SQL = """
@@ -199,7 +256,7 @@ SELECT
   product_type, ext_source, ext_id, payload, content_hash,
   TRUE, now(), now(), now()
 FROM need_insert
-RETURNING id;
+RETURNING id, ext_id, fin_prdt_nm;
 """
 
 BASE_TOUCH_SQL = """
@@ -226,7 +283,7 @@ RETURNING p.id;
 """
 
 # ------------------------
-# OPTION 업서트 (현재본 base와만 매칭)
+# OPTION 업서트 (동일)
 # ------------------------
 OPTION_UPSERT_SQL = """
 -- 현재본 product들과 매칭되는 옵션 "원천" 후보
@@ -330,7 +387,7 @@ SELECT
 """
 
 # ------------------------
-# 옵션 세트 해시/개수 갱신
+# 옵션 세트 해시/개수 갱신 (동일)
 # ------------------------
 RECOMPUTE_OPTION_SET_HASH_SQL = """
 WITH base_now AS (
@@ -404,26 +461,197 @@ WHERE p.id = z.product_id
   AND p.product_type = :product_type;
 """
 
-def upsert_for_type(conn, product_type: str) -> Tuple[int, int, int]:
-    # 1) BASE: close / insert / touch
-    conn.execute(text(BASE_CLOSE_SQL), {"product_type": product_type})
-    conn.execute(text(BASE_INSERT_SQL), {"product_type": product_type})
+# ------------------------
+# Gemini 우대조건 분석
+# ------------------------
+ANALYSIS_PROMPT = """
+다음은 은행 예금/적금 상품의 우대조건 텍스트입니다. 
+이 텍스트를 분석하여 아래 9개 카테고리 각각에 해당하는지 true/false로 판단해주세요.
+
+카테고리 정의:
+1. is_non_face_to_face: 비대면 가입 (인터넷, 모바일, 온라인 등)
+2. is_bank_app: 은행 앱 사용 (모바일뱅킹, 앱 이용 등)
+3. is_salary_linked: 급여 연동 (급여이체, 급여통장 등)
+4. is_pension_linked: 연금 관련 (국민연금, 공무원연금, 사학연금, 연금통장 등)
+5. is_utility_linked: 공과금 연동 (공과금 자동이체, 공공요금 등)
+6. is_card_usage: 카드 사용 (결제계좌, 체크카드, 신용카드 등)
+7. is_first_transaction: 첫 거래 (신규고객, 첫거래, 신규가입 등)
+8. is_checking_account: 입출금통장 (입출금계좌, 자유적금, 적립식예금 등)
+9. is_redeposit: 재예치 (재예치, 만기연장, 자동연장 등)
+
+분석할 텍스트:
+{spcl_cnd}
+
+응답 형식 (JSON):
+{{
+    "is_non_face_to_face": true/false,
+    "is_bank_app": true/false,
+    "is_salary_linked": true/false,
+    "is_pension_linked": true/false,
+    "is_utility_linked": true/false,
+    "is_card_usage": true/false,
+    "is_first_transaction": true/false,
+    "is_checking_account": true/false,
+    "is_redeposit": true/false
+}}
+
+JSON 형태로만 응답해주세요.
+"""
+
+def analyze_special_condition(spcl_cnd: str) -> Optional[SpecialCondition]:
+    """Gemini API를 사용하여 우대조건 텍스트 분석"""
+    if not GEMINI_AVAILABLE or not GEMINI_API_KEY or GEMINI_API_KEY == "your_gemini_api_key_here":
+        log.warning("Gemini API not available - skipping special condition analysis")
+        return None
+        
+    if not spcl_cnd or spcl_cnd.strip() == "":
+        return SpecialCondition()
+    
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash-lite')
+        prompt = ANALYSIS_PROMPT.format(spcl_cnd=spcl_cnd)
+        
+        response = model.generate_content(prompt)
+        result_text = response.text.strip()
+        
+        # JSON 파싱
+        if result_text.startswith('```json'):
+            result_text = result_text[7:-3].strip()
+        elif result_text.startswith('```'):
+            result_text = result_text[3:-3].strip()
+            
+        result_dict = json.loads(result_text)
+        
+        return SpecialCondition(
+            is_non_face_to_face=result_dict.get('is_non_face_to_face', False),
+            is_bank_app=result_dict.get('is_bank_app', False),
+            is_salary_linked=result_dict.get('is_salary_linked', False),
+            is_pension_linked=result_dict.get('is_pension_linked', False),
+            is_utility_linked=result_dict.get('is_utility_linked', False),
+            is_card_usage=result_dict.get('is_card_usage', False),
+            is_first_transaction=result_dict.get('is_first_transaction', False),
+            is_checking_account=result_dict.get('is_checking_account', False),
+            is_redeposit=result_dict.get('is_redeposit', False)
+        )
+        
+    except Exception as e:
+        log.error(f"Gemini API 분석 실패: {e}")
+        log.error(f"텍스트: {spcl_cnd[:100]}...")
+        return None
+
+def save_special_condition(conn, product_id: int, condition: SpecialCondition) -> None:
+    """우대조건 분석 결과 저장"""
+    query = """
+    INSERT INTO core.product_special_condition (
+        product_id, is_non_face_to_face, is_bank_app, is_salary_linked,
+        is_pension_linked, is_utility_linked, is_card_usage,
+        is_first_transaction, is_checking_account, is_redeposit,
+        created_at, updated_at
+    ) VALUES (
+        :product_id, :is_non_face_to_face, :is_bank_app, :is_salary_linked,
+        :is_pension_linked, :is_utility_linked, :is_card_usage,
+        :is_first_transaction, :is_checking_account, :is_redeposit,
+        now(), now()
+    )
+    ON CONFLICT (product_id) DO UPDATE SET
+        is_non_face_to_face = EXCLUDED.is_non_face_to_face,
+        is_bank_app = EXCLUDED.is_bank_app,
+        is_salary_linked = EXCLUDED.is_salary_linked,
+        is_pension_linked = EXCLUDED.is_pension_linked,
+        is_utility_linked = EXCLUDED.is_utility_linked,
+        is_card_usage = EXCLUDED.is_card_usage,
+        is_first_transaction = EXCLUDED.is_first_transaction,
+        is_checking_account = EXCLUDED.is_checking_account,
+        is_redeposit = EXCLUDED.is_redeposit,
+        updated_at = now()
+    """
+    
+    conn.execute(text(query), {
+        "product_id": product_id,
+        "is_non_face_to_face": condition.is_non_face_to_face,
+        "is_bank_app": condition.is_bank_app,
+        "is_salary_linked": condition.is_salary_linked,
+        "is_pension_linked": condition.is_pension_linked,
+        "is_utility_linked": condition.is_utility_linked,
+        "is_card_usage": condition.is_card_usage,
+        "is_first_transaction": condition.is_first_transaction,
+        "is_checking_account": condition.is_checking_account,
+        "is_redeposit": condition.is_redeposit
+    })
+
+def analyze_changed_products(conn, changed_product_ids: List[int], skip_gemini: bool = False) -> Tuple[int, int]:
+    """변경된 상품들의 우대조건 분석"""
+    if skip_gemini or not changed_product_ids:
+        return 0, 0
+    
+    # 우대조건이 있는 상품만 조회
+    query = """
+    SELECT id, fin_prdt_nm, spcl_cnd
+    FROM core.product 
+    WHERE id = ANY(:product_ids) 
+      AND is_current = TRUE 
+      AND spcl_cnd IS NOT NULL 
+      AND spcl_cnd != ''
+    """
+    
+    result = conn.execute(text(query), {"product_ids": changed_product_ids})
+    products = [dict(row._mapping) for row in result]
+    
+    success_count = 0
+    failure_count = 0
+    
+    for product in products:
+        product_id = product['id']
+        fin_prdt_nm = product['fin_prdt_nm']
+        spcl_cnd = product['spcl_cnd']
+        
+        log.info(f"우대조건 분석 중: {fin_prdt_nm}")
+        
+        condition = analyze_special_condition(spcl_cnd)
+        
+        if condition is not None:
+            save_special_condition(conn, product_id, condition)
+            success_count += 1
+            log.info(f"✓ 우대조건 분석 완료: {product_id}")
+        else:
+            failure_count += 1
+            log.error(f"✗ 우대조건 분석 실패: {product_id}")
+    
+    return success_count, failure_count
+
+def upsert_for_type(conn, product_type: str, skip_gemini: bool = False) -> Tuple[int, int, int, int, int]:
+    """타입별 업서트 + 우대조건 분석"""
+    changed_product_ids = []
+    
+    # 1) BASE: close / insert / touch (변경 추적)
+    close_result = conn.execute(text(BASE_CLOSE_SQL), {"product_type": product_type})
+    closed_products = [dict(row._mapping) for row in close_result]
+    
+    insert_result = conn.execute(text(BASE_INSERT_SQL), {"product_type": product_type})
+    inserted_products = [dict(row._mapping) for row in insert_result]
+    
     conn.execute(text(BASE_TOUCH_SQL), {"product_type": product_type})
-
-    # 2) OPTION: upsert (close/insert/touch 카운트 로그용)
+    
+    # 변경된 상품 ID 수집
+    changed_product_ids.extend([p['id'] for p in inserted_products])
+    
+    # 2) OPTION: upsert
     res = conn.execute(text(OPTION_UPSERT_SQL), {"product_type": product_type}).mappings().first()
-    closed_cnt   = int(res["closed_cnt"])
+    closed_cnt = int(res["closed_cnt"])
     inserted_cnt = int(res["inserted_cnt"])
-    touched_cnt  = int(res["touched_cnt"])
-
+    touched_cnt = int(res["touched_cnt"])
+    
     # 3) 옵션 세트 해시/개수 재계산
     conn.execute(text(RECOMPUTE_OPTION_SET_HASH_SQL), {"product_type": product_type})
+    
+    # 4) 변경된 상품의 우대조건 분석
+    gemini_success, gemini_failure = analyze_changed_products(conn, changed_product_ids, skip_gemini)
+    
+    return closed_cnt, inserted_cnt, touched_cnt, gemini_success, gemini_failure
 
-    return closed_cnt, inserted_cnt, touched_cnt
-
-def run(which: str) -> None:
+def run(which: str, skip_gemini: bool = False) -> None:
     if which not in ("all", "deposit", "saving"):
-        raise SystemExit("Usage: python stg_to_core.py [all|deposit|saving]")
+        raise SystemExit("Usage: python stg_to_core.py [all|deposit|saving] [--skip-gemini]")
 
     engine: Engine = create_engine(PG_DSN_FIN, future=True)
 
@@ -432,20 +660,30 @@ def run(which: str) -> None:
         conn.execute(text(BOOTSTRAP_SQL))
 
     types = ("deposit", "saving") if which == "all" else (which,)
-    total_ins = total_cls = total_tch = 0
+    total_ins = total_cls = total_tch = total_gem_suc = total_gem_fail = 0
 
     for t in types:
         pt = PRODUCT_TYPES[t]
         log.info("UPSERT start | product_type=%s", pt)
         with engine.begin() as conn:
-            c, i, h = upsert_for_type(conn, pt)
+            c, i, h, gs, gf = upsert_for_type(conn, pt, skip_gemini)
         total_cls += c
         total_ins += i
         total_tch += h
-        log.info("UPSERT done  | type=%s | opt_closed=%d, opt_inserted=%d, opt_touched=%d", pt, c, i, h)
+        total_gem_suc += gs
+        total_gem_fail += gf
+        log.info("UPSERT done | type=%s | opt_closed=%d, opt_inserted=%d, opt_touched=%d | gemini_success=%d, gemini_failed=%d", 
+                 pt, c, i, h, gs, gf)
 
-    log.info("ALL DONE | opt_closed=%d, opt_inserted=%d, opt_touched=%d", total_cls, total_ins, total_tch)
+    log.info("ALL DONE | opt_closed=%d, opt_inserted=%d, opt_touched=%d | gemini_success=%d, gemini_failed=%d", 
+             total_cls, total_ins, total_tch, total_gem_suc, total_gem_fail)
 
 if __name__ == "__main__":
-    arg = sys.argv[1] if len(sys.argv) > 1 else "all"
-    run(arg)
+    args = sys.argv[1:]
+    arg = args[0] if args else "all"
+    skip_gemini = "--skip-gemini" in args
+    
+    if skip_gemini:
+        log.info("Gemini 분석을 건너뜁니다")
+    
+    run(arg, skip_gemini)
