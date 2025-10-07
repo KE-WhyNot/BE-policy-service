@@ -3,8 +3,8 @@ from fastapi import APIRouter, HTTPException, Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-from apps.api.core.db import get_db
-from apps.api.schemas.policy.policy_id import (
+from app.core.db import get_db
+from app.schemas.policy.policy_id import (
     PolicyDetailResponse, 
     PolicyNotFoundResponse,
     PolicyTop,
@@ -15,11 +15,11 @@ from apps.api.schemas.policy.policy_id import (
     PolicyMeta
 )
 
-router = APIRouter(tags=["policy"])
+router = APIRouter(tags=["[POLICY] Policy List and Detail"])
 
 
 @router.get(
-    "/policy/{policy_id}", 
+    "/{id}", 
     response_model=PolicyDetailResponse,
     responses={
         200: {"description": "정책 상세 조회 성공"},
