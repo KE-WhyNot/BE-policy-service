@@ -58,12 +58,15 @@ class SpecialCondition:
     is_non_face_to_face: bool = False
     is_bank_app: bool = False
     is_salary_linked: bool = False
-    is_pension_linked: bool = False
     is_utility_linked: bool = False
     is_card_usage: bool = False
     is_first_transaction: bool = False
     is_checking_account: bool = False
+    is_pension_linked: bool = False
     is_redeposit: bool = False
+    is_subscription_linked: bool = False
+    is_recommend_coupon: bool = False
+    is_auto_transfer: bool = False
 
 # ------------------------
 # BOOTSTRAP (멱등)
@@ -167,34 +170,61 @@ CREATE INDEX IF NOT EXISTS idx_option_product
 CREATE TABLE IF NOT EXISTS core.product_special_condition (
     id                   SERIAL PRIMARY KEY,
     product_id           BIGINT NOT NULL REFERENCES core.product(id) ON DELETE CASCADE,
+    
+    -- 공통 (예금 + 적금)
     is_non_face_to_face  BOOLEAN DEFAULT FALSE,
     is_bank_app          BOOLEAN DEFAULT FALSE,
     is_salary_linked     BOOLEAN DEFAULT FALSE,
-    is_pension_linked    BOOLEAN DEFAULT FALSE,
     is_utility_linked    BOOLEAN DEFAULT FALSE,
     is_card_usage        BOOLEAN DEFAULT FALSE,
     is_first_transaction BOOLEAN DEFAULT FALSE,
     is_checking_account  BOOLEAN DEFAULT FALSE,
+    
+    -- 예금 전용
+    is_pension_linked    BOOLEAN DEFAULT FALSE,
     is_redeposit         BOOLEAN DEFAULT FALSE,
+    
+    -- 적금 전용
+    is_subscription_linked BOOLEAN DEFAULT FALSE,
+    is_recommend_coupon    BOOLEAN DEFAULT FALSE,
+    is_auto_transfer       BOOLEAN DEFAULT FALSE,
+    
     error                BOOLEAN DEFAULT FALSE,
     created_at           TIMESTAMPTZ DEFAULT now(),
     updated_at           TIMESTAMPTZ DEFAULT now()
 );
+
+-- 누락된 컬럼들 추가 (멱등)
+ALTER TABLE core.product_special_condition 
+ADD COLUMN IF NOT EXISTS is_subscription_linked BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS is_recommend_coupon    BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS is_auto_transfer       BOOLEAN DEFAULT FALSE;
 
 -- error 컬럼이 없는 경우 추가
 ALTER TABLE core.product_special_condition 
 ADD COLUMN IF NOT EXISTS error BOOLEAN DEFAULT FALSE;
 
 COMMENT ON TABLE core.product_special_condition IS '예·적금 상품 우대조건 테이블';
-COMMENT ON COLUMN core.product_special_condition.is_non_face_to_face IS '비대면가입';
-COMMENT ON COLUMN core.product_special_condition.is_bank_app IS '은행앱사용';
-COMMENT ON COLUMN core.product_special_condition.is_salary_linked IS '급여연동';
-COMMENT ON COLUMN core.product_special_condition.is_pension_linked IS '연금';
-COMMENT ON COLUMN core.product_special_condition.is_utility_linked IS '공과금연동';
-COMMENT ON COLUMN core.product_special_condition.is_card_usage IS '카드사용';
-COMMENT ON COLUMN core.product_special_condition.is_first_transaction IS '첫거래';
-COMMENT ON COLUMN core.product_special_condition.is_checking_account IS '입출금통장';
-COMMENT ON COLUMN core.product_special_condition.is_redeposit IS '재예치';
+
+-- 공통 (예금 + 적금)
+COMMENT ON COLUMN core.product_special_condition.is_non_face_to_face IS '비대면가입 (예금/적금 공통)';
+COMMENT ON COLUMN core.product_special_condition.is_bank_app IS '은행앱사용 (예금/적금 공통)';
+COMMENT ON COLUMN core.product_special_condition.is_salary_linked IS '급여연동 (예금/적금 공통)';
+COMMENT ON COLUMN core.product_special_condition.is_utility_linked IS '공과금연동 (예금/적금 공통)';
+COMMENT ON COLUMN core.product_special_condition.is_card_usage IS '카드사용 (예금/적금 공통)';
+COMMENT ON COLUMN core.product_special_condition.is_first_transaction IS '첫거래 (예금/적금 공통)';
+COMMENT ON COLUMN core.product_special_condition.is_checking_account IS '입출금통장 (예금/적금 공통)';
+
+-- 예금 전용
+COMMENT ON COLUMN core.product_special_condition.is_pension_linked IS '연금 (예금 전용)';
+COMMENT ON COLUMN core.product_special_condition.is_redeposit IS '재예치 (예금 전용)';
+
+-- 적금 전용
+COMMENT ON COLUMN core.product_special_condition.is_subscription_linked IS '청약보유 (적금 전용)';
+COMMENT ON COLUMN core.product_special_condition.is_recommend_coupon IS '추천/쿠폰 (적금 전용)';
+COMMENT ON COLUMN core.product_special_condition.is_auto_transfer IS '자동이체/달성 (적금 전용)';
+
+COMMENT ON COLUMN core.product_special_condition.error IS 'AI 분석 실패 여부';
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_product_special_condition
     ON core.product_special_condition(product_id);
@@ -488,18 +518,21 @@ WHERE p.id = z.product_id
 # ------------------------
 ANALYSIS_PROMPT = """
 다음은 은행 예금/적금 상품의 우대조건 텍스트입니다. 
-이 텍스트를 분석하여 아래 9개 카테고리 각각에 해당하는지 true/false로 판단해주세요.
+이 텍스트를 분석하여 아래 12개 카테고리 각각에 해당하는지 true/false로 판단해주세요.
 
 카테고리 정의:
 1. is_non_face_to_face: 비대면 가입 (인터넷, 모바일, 온라인 등)
 2. is_bank_app: 은행 앱 사용 (모바일뱅킹, 앱 이용 등)
 3. is_salary_linked: 급여 연동 (급여이체, 급여통장 등)
-4. is_pension_linked: 연금 관련 (국민연금, 공무원연금, 사학연금, 연금통장 등)
-5. is_utility_linked: 공과금 연동 (공과금 자동이체, 공공요금 등)
-6. is_card_usage: 카드 사용 (결제계좌, 체크카드, 신용카드 등)
-7. is_first_transaction: 첫 거래 (신규고객, 첫거래, 신규가입 등)
-8. is_checking_account: 입출금통장 (입출금계좌, 자유적금, 적립식예금 등)
+4. is_utility_linked: 공과금 연동 (공과금 자동이체, 공공요금 등)
+5. is_card_usage: 카드 사용 (결제계좌, 체크카드, 신용카드 등)
+6. is_first_transaction: 첫 거래 (신규고객, 첫거래, 신규가입 등)
+7. is_checking_account: 입출금통장 (입출금계좌, 자유적금, 적립식예금 등)
+8. is_pension_linked: 연금 관련 (국민연금, 공무원연금, 사학연금, 연금통장 등)
 9. is_redeposit: 재예치 (재예치, 만기연장, 자동연장 등)
+10. is_subscription_linked: 청약보유 (청약통장, 청약가입, 주택청약 등)
+11. is_recommend_coupon: 추천/쿠폰 (추천코드, 쿠폰, 이벤트, 프로모션 등)
+12. is_auto_transfer: 자동이체/달성 (자동이체, 목표달성, 적립 목표 등)
 
 분석할 텍스트:
 {spcl_cnd}
@@ -509,12 +542,15 @@ ANALYSIS_PROMPT = """
     "is_non_face_to_face": true/false,
     "is_bank_app": true/false,
     "is_salary_linked": true/false,
-    "is_pension_linked": true/false,
     "is_utility_linked": true/false,
     "is_card_usage": true/false,
     "is_first_transaction": true/false,
     "is_checking_account": true/false,
-    "is_redeposit": true/false
+    "is_pension_linked": true/false,
+    "is_redeposit": true/false,
+    "is_subscription_linked": true/false,
+    "is_recommend_coupon": true/false,
+    "is_auto_transfer": true/false
 }}
 
 JSON 형태로만 응답해주세요.
@@ -562,12 +598,15 @@ def analyze_special_condition(spcl_cnd: str, max_retries: int = 3) -> Tuple[Opti
                 is_non_face_to_face=result_dict.get('is_non_face_to_face', False),
                 is_bank_app=result_dict.get('is_bank_app', False),
                 is_salary_linked=result_dict.get('is_salary_linked', False),
-                is_pension_linked=result_dict.get('is_pension_linked', False),
                 is_utility_linked=result_dict.get('is_utility_linked', False),
                 is_card_usage=result_dict.get('is_card_usage', False),
                 is_first_transaction=result_dict.get('is_first_transaction', False),
                 is_checking_account=result_dict.get('is_checking_account', False),
-                is_redeposit=result_dict.get('is_redeposit', False)
+                is_pension_linked=result_dict.get('is_pension_linked', False),
+                is_redeposit=result_dict.get('is_redeposit', False),
+                is_subscription_linked=result_dict.get('is_subscription_linked', False),
+                is_recommend_coupon=result_dict.get('is_recommend_coupon', False),
+                is_auto_transfer=result_dict.get('is_auto_transfer', False)
             )
             
             return condition, True
@@ -590,25 +629,28 @@ def save_special_condition(conn, product_id: int, condition: SpecialCondition, e
     query = """
     INSERT INTO core.product_special_condition (
         product_id, is_non_face_to_face, is_bank_app, is_salary_linked,
-        is_pension_linked, is_utility_linked, is_card_usage,
-        is_first_transaction, is_checking_account, is_redeposit,
-        error, created_at, updated_at
+        is_utility_linked, is_card_usage, is_first_transaction, is_checking_account,
+        is_pension_linked, is_redeposit, is_subscription_linked, is_recommend_coupon,
+        is_auto_transfer, error, created_at, updated_at
     ) VALUES (
         :product_id, :is_non_face_to_face, :is_bank_app, :is_salary_linked,
-        :is_pension_linked, :is_utility_linked, :is_card_usage,
-        :is_first_transaction, :is_checking_account, :is_redeposit,
-        :error, now(), now()
+        :is_utility_linked, :is_card_usage, :is_first_transaction, :is_checking_account,
+        :is_pension_linked, :is_redeposit, :is_subscription_linked, :is_recommend_coupon,
+        :is_auto_transfer, :error, now(), now()
     )
     ON CONFLICT (product_id) DO UPDATE SET
         is_non_face_to_face = EXCLUDED.is_non_face_to_face,
         is_bank_app = EXCLUDED.is_bank_app,
         is_salary_linked = EXCLUDED.is_salary_linked,
-        is_pension_linked = EXCLUDED.is_pension_linked,
         is_utility_linked = EXCLUDED.is_utility_linked,
         is_card_usage = EXCLUDED.is_card_usage,
         is_first_transaction = EXCLUDED.is_first_transaction,
         is_checking_account = EXCLUDED.is_checking_account,
+        is_pension_linked = EXCLUDED.is_pension_linked,
         is_redeposit = EXCLUDED.is_redeposit,
+        is_subscription_linked = EXCLUDED.is_subscription_linked,
+        is_recommend_coupon = EXCLUDED.is_recommend_coupon,
+        is_auto_transfer = EXCLUDED.is_auto_transfer,
         error = EXCLUDED.error,
         updated_at = now()
     """
@@ -618,12 +660,15 @@ def save_special_condition(conn, product_id: int, condition: SpecialCondition, e
         "is_non_face_to_face": condition.is_non_face_to_face,
         "is_bank_app": condition.is_bank_app,
         "is_salary_linked": condition.is_salary_linked,
-        "is_pension_linked": condition.is_pension_linked,
         "is_utility_linked": condition.is_utility_linked,
         "is_card_usage": condition.is_card_usage,
         "is_first_transaction": condition.is_first_transaction,
         "is_checking_account": condition.is_checking_account,
+        "is_pension_linked": condition.is_pension_linked,
         "is_redeposit": condition.is_redeposit,
+        "is_subscription_linked": condition.is_subscription_linked,
+        "is_recommend_coupon": condition.is_recommend_coupon,
+        "is_auto_transfer": condition.is_auto_transfer,
         "error": error
     })
 
