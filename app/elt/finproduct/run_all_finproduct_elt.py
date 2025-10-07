@@ -12,10 +12,9 @@ from datetime import datetime
 
 STEPS = [
     "01_raw_ingest.py",
-    "02_stg_landing.py",
-    "03_stg_refresh_current.py",
+    "02_stg_base.py",
+    "03_stg_option.py",
     "04_stg_to_core.py",
-    "05_update_policy_status.py",
 ]
 
 BASE_DIR = os.path.join(os.path.dirname(__file__))
@@ -34,11 +33,12 @@ def run_step(script_name: str):
         sys.exit(1)
 
 def main():
-    print("🧑‍🤝‍🧑🧑‍🤝‍🧑🧑‍🤝‍🧑 Starting Policy ELT Pipeline...")
+    print("💶💶💶 Starting FinProduct ELT Pipeline...")
+
     for script in STEPS:
         run_step(script)
 
-    print("🎉 All policy ELT steps completed successfully.")
+    print("🎉 All finProduct ELT steps completed successfully.")
 
 if __name__ == "__main__":
     main()
