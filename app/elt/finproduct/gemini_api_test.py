@@ -20,7 +20,7 @@ else:
         genai.configure(api_key=api_key)
 
         # 유효한 모델을 생성합니다.
-        model = genai.GenerativeModel(model_name="gemini-2.5-flash")
+        model = genai.GenerativeModel(model_name="gemini-2.5-flash-lite")
 
         # 콘텐츠 생성을 요청합니다.
         response = model.generate_content("AI가 어떻게 작동하는지 몇 단어로 설명해 줘")
