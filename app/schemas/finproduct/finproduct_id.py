@@ -13,6 +13,7 @@ class FinProductTop(BaseModel):
     product_name: str
     
     # 은행명
+    # core.product의 kor_co_nm 컬럼값을 master.bank와 조인해서 nickname으로 변경
     bank_name: str
     
     # 은행 id
@@ -33,22 +34,28 @@ class FinProductTop(BaseModel):
 # -----------------------------
 class FinProductBottom1(BaseModel):
     # 기간
+    # core.product_option에서 product_id로 조인 후 가장 짧은/긴 기간 파싱해 출력 (ex: 12 ~ 60개월)
     period: str
     
     # 금액
-    amount: str
+    # DB에 컬럼 없어서 반환 불가
+    # amount: str
     
     # 가입방법
+    # core.product.join_way 컬럼에서 파싱 (원본값 "인터넷,스마트폰" 이런 식이라 콤마 사이에 공백만 하나씩 추가)
     subscription_method: str
     
     # 대상
+    # core.product.join_member 컬럼값 그대로 반환
     target: str
     
     # 우대조건
+    # core.product에서 spcl_cnd 컬럼값 그대로 반환
     special_conditions: str
     
-    # 이자지급 (단리/복리)
-    interest_payment: str
+    # 상품 안내 (단리/복리)
+    # core.product에서 etc_note 컬럼값 그대로 반환
+    product_guide: str
 
 
 # -----------------------------
@@ -56,6 +63,10 @@ class FinProductBottom1(BaseModel):
 # -----------------------------
 class FinProductBottom2(BaseModel):
     # 기간별 금리 표 들어갈 데이터
+    # core.product_option에서 product_id로 조인 후 옵션별 금리 정보 파싱
+    # 컬럼 1 : core.product_option.save_trm (저축기간) + "개월"
+    # 컬럼 2 : core.product_option.intr_rate (기본금리) + "%"
+    # 컬럼 3 : core.product_option.intr_rate2 (우대금리) + "%"
     interest_rates: List[Dict] = []
 
 
