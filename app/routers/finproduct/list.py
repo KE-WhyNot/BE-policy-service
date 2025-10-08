@@ -18,6 +18,8 @@ DEBUG = False
 
 # ----------------------------------------------------------
 # [상수 정의] '누구나 가입' 판별 키워드
+#   - join_member 문자열(개행/공백 제거 후) 안에 아래 키워드 중
+#     하나라도 포함되면 "누구나 가입" chip 추가
 # ----------------------------------------------------------
 UNLIMITED_JOIN_KEYWORDS = [
     "개인",
@@ -25,25 +27,44 @@ UNLIMITED_JOIN_KEYWORDS = [
     "모든고객",
     "제한없음",
     "누구나가입가능",
-    "개인사업자, 조합(비영리법인 포함), 법인",
-    "제한없음 (단,비거주 외국인 제외)",
+    "개인사업자,조합(비영리법인포함),법인",
+    "제한없음(단,비거주외국인제외)",
     "제한없음.",
-    "실명의\n개인 및 \n개인사업자",
-    "실명의 개인",
-    "누구나 가입가능",
-    "실명의 개인\n또는 개인사업자",
-    "실명의 개인 및 개인사업자",
-    "실명의 \n 개인 및 \n 개인사업자",
-    "제한 없음",
-    "개인 및 개인사업자",
-    "개인 및 법인(단,국가 지자체 및 금융기관 제외)",
-    "개인(개인사업자 포함)",
+    "실명의개인및개인사업자",
+    "실명의개인",
+    "누구나가입가능",
+    "실명의개인또는개인사업자",
+    "제한없음",
+    "개인및개인사업자",
+    "개인및법인(단,국가지자체및금융기관제외)",
+    "개인(개인사업자포함)",
     "개인,개인사업자,법인",
-    "개인, 개인사업자, 임의단체",
-    "내·외국인 대상",
+    "개인,개인사업자,임의단체",
+    "내·외국인대상",
     "-제한없음",
-    "실명의 개인\n또는 개인사업자(1인 다계좌 가능)"
+    "실명의개인또는개인사업자(1인다계좌가능)",
 ]
+
+# ----------------------------------------------------------
+# [상수 정의] 우대조건 문자열 → 컬럼 매핑
+#   - special_conditions 파라미터로 들어오는 값과 매핑
+#   - OR 조건으로 결합됨 (예: 비대면가입 OR 카드사용)
+# ----------------------------------------------------------
+SPECIAL_CONDITION_MAP = {
+    "비대면가입": "psc.is_non_face_to_face",
+    "은행앱사용": "psc.is_bank_app",
+    "급여연동": "psc.is_salary_linked",
+    "공과금연동": "psc.is_utility_linked",
+    "카드사용": "psc.is_card_usage",
+    "첫거래": "psc.is_first_transaction",
+    "입출금통장": "psc.is_checking_account",
+    "연금": "psc.is_pension_linked",
+    "재예치": "psc.is_redeposit",
+    "청약보유": "psc.is_subscription_linked",
+    "추천/쿠폰": "psc.is_recommend_coupon",
+    "자동이체": "psc.is_auto_transfer",
+}
+
 
 # ----------------------------------------------------------
 # [엔드포인트] /api/finproduct/list
@@ -61,19 +82,24 @@ async def get_finproduct_list(
     page_num: int = Query(default=1, description="페이지 번호"),
     page_size: int = Query(default=10, description="페이지 크기 (0 입력 시 전체 출력)"),
 
-    # 디버그용
+    # 디버그용 (정확히 해당 상품만 조회)
     finproduct_id: int | None = Query(default=None, description="💻 디버그용 금융상품 ID"),
 
     # 필터
     banks: list[int] | None = Query(default=None, description="은행 ID 리스트 (/api/finproduct/filter/bank 에서 확인)"),
-    periods: int | None = Query(default=None, description="기간 필터 (6, 12, 24개월)"),
-    special_conditions: list[str] | None = Query(default=None, description="우대조건 필터 (여러개 가능)"),
-    interest_rate_sort: str = Query(default="include_bonus", description="금리 정렬 (최고금리순 : include_bonus / 기본금리순 : base_only)"),
+    product_type: int | None = Query(default=None, description="상품 유형: 0(전체), 1(예금만), 2(적금만)"),
+    periods: int | None = Query(default=None, description="기간 필터: 해당 개월수 이상의 옵션 보유 상품만 (예: 6/12/24)"),
+    special_conditions: list[str] | None = Query(
+        default=None,
+        description="우대조건 필터 (여러개 가능) -> 비대면가입, 은행앱사용, 급여연동, 공과금연동, 카드사용, 첫거래, 입출금통장, 연금, 재예치, 청약보유, 추천/쿠폰, 자동이체"
+    ),
+    interest_rate_sort: str = Query(default="include_bonus", description="정렬: include_bonus(최고금리순) / base_only(기본금리순)"),
 
-    db: AsyncSession = Depends(get_fin_db)
+    db: AsyncSession = Depends(get_fin_db),
 ):
     # ----------------------------------------------------------
     # [1] 기본 FROM / JOIN 절
+    #   - bank_name은 master.bank.nickname 사용
     # ----------------------------------------------------------
     base_tables = """
     FROM core.product p
@@ -83,53 +109,69 @@ async def get_finproduct_list(
     LEFT JOIN core.product_join_way pjw ON p.id = pjw.product_id
     """
 
-    where_conditions = []
-    params = {}
+    where_conditions: list[str] = []
+    params: dict[str, object] = {}
 
     # ----------------------------------------------------------
     # [2] 필터 조건
     # ----------------------------------------------------------
-    
-    # 디버그용 finproduct_id 필터
-    if finproduct_id:
+    # 2-1) finproduct_id
+    if finproduct_id is not None:
         where_conditions.append("p.id = :finproduct_id")
         params["finproduct_id"] = finproduct_id
 
-    if banks:
-        where_conditions.append("b.id = ANY(string_to_array(:banks, ',')::int[])")
-        params["banks"] = ",".join(map(str, banks))
+    # 2-2) banks (PostgreSQL ANY 배열 바인딩)
+    if banks is not None and len(banks) > 0:
+        where_conditions.append("b.id = ANY(:banks)")
+        params["banks"] = banks  # list[int] 그대로 전달 (asyncpg가 int[]로 바인딩)
 
-    if periods:
+    # 2-3) product_type (0: 전체, 1: 예금만, 2: 적금만)
+    if product_type == 1:
+        where_conditions.append("p.product_type = 'DEPOSIT'")
+    elif product_type == 2:
+        where_conditions.append("p.product_type = 'SAVING'")
+    # product_type == 0 또는 None인 경우 조건 추가 안함 (전체 조회)
+
+    # 2-4) periods (해당 개월수 이상인 옵션이 하나라도 있는 상품)
+    if periods is not None:
         where_conditions.append("po.save_trm >= :periods")
         params["periods"] = periods
 
-    if special_conditions:
-        # TODO: 우대조건별 매핑 dict 구성 필요
-        where_conditions.append("psc.is_non_face_to_face = TRUE")
+    # 2-5) special_conditions (매핑되는 항목만 AND로 결합)
+    if special_conditions is not None and len(special_conditions) > 0:
+        matched_cols = [SPECIAL_CONDITION_MAP[s] for s in special_conditions if s in SPECIAL_CONDITION_MAP]
+        if matched_cols:
+            where_conditions.append("(" + " AND ".join(f"{c} = TRUE" for c in matched_cols) + ")")
+        # 매칭되는 항목이 하나도 없으면 조건을 추가하지 않음
+        # (원한다면 400으로 에러 처리하도록 변경 가능)
 
     where_clause = "WHERE 1=1 " + ("AND " + " AND ".join(where_conditions) if where_conditions else "")
 
     # ----------------------------------------------------------
-    # [3] 정렬 조건 (금리 통합기준)
+    # [3] 공통 금리 계산식 (0과 NULL은 제외하고 intr_rate/intr_rate2 통합)
+    #   - min_interest_rate: 두 컬럼의 유효값 중 최소 → 그 중 전체 MIN
+    #   - max_interest_rate: 두 컬럼의 유효값 중 최대 → 그 중 전체 MAX
     # ----------------------------------------------------------
-    if interest_rate_sort == "include_bonus":
-        order_clause = """
-        ORDER BY MAX(
-            GREATEST(
-                COALESCE(NULLIF(po.intr_rate, 0), 0),
-                COALESCE(NULLIF(po.intr_rate2, 0), 0)
-            )
-        ) DESC
-        """
-    else:
-        order_clause = """
-        ORDER BY MIN(
-            LEAST(
-                NULLIF(po.intr_rate, 0),
-                NULLIF(po.intr_rate2, 0)
-            )
-        ) DESC
-        """
+    min_rate_sql = """
+        MIN(
+            CASE
+                WHEN NULLIF(po.intr_rate, 0) IS NULL AND NULLIF(po.intr_rate2, 0) IS NULL THEN NULL
+                WHEN NULLIF(po.intr_rate, 0) IS NULL THEN NULLIF(po.intr_rate2, 0)
+                WHEN NULLIF(po.intr_rate2, 0) IS NULL THEN NULLIF(po.intr_rate, 0)
+                ELSE LEAST(NULLIF(po.intr_rate, 0), NULLIF(po.intr_rate2, 0))
+            END
+        )
+    """
+    max_rate_sql = """
+        MAX(
+            CASE
+                WHEN NULLIF(po.intr_rate, 0) IS NULL AND NULLIF(po.intr_rate2, 0) IS NULL THEN NULL
+                WHEN NULLIF(po.intr_rate, 0) IS NULL THEN NULLIF(po.intr_rate2, 0)
+                WHEN NULLIF(po.intr_rate2, 0) IS NULL THEN NULLIF(po.intr_rate, 0)
+                ELSE GREATEST(NULLIF(po.intr_rate, 0), NULLIF(po.intr_rate2, 0))
+            END
+        )
+    """
 
     # ----------------------------------------------------------
     # [4] COUNT SQL
@@ -141,31 +183,23 @@ async def get_finproduct_list(
     """
 
     # ----------------------------------------------------------
-    # [5] DATA SQL (intr_rate / intr_rate2 함께 고려)
+    # [5] DATA SQL
+    #   - bank_name: b.nickname (마스터 테이블 별칭)
+    #   - join_ways: DISTINCT + NULL 제외
     # ----------------------------------------------------------
     data_sql = f"""
     SELECT DISTINCT
         p.id,
         b.id AS bank_id,
-        b.nickname AS bank_name,  -- ✅ 수정됨
+        b.nickname AS bank_name,
         p.fin_prdt_nm AS product_name,
         p.join_member,
         p.etc_note,
 
-        MIN(
-            LEAST(
-                NULLIF(po.intr_rate, 0),
-                NULLIF(po.intr_rate2, 0)
-            )
-        ) AS min_interest_rate,
-        MAX(
-            GREATEST(
-                COALESCE(NULLIF(po.intr_rate, 0), 0),
-                COALESCE(NULLIF(po.intr_rate2, 0), 0)
-            )
-        ) AS max_interest_rate,
+        {min_rate_sql} AS min_interest_rate,
+        {max_rate_sql} AS max_interest_rate,
 
-        ARRAY_AGG(DISTINCT pjw.join_way) AS join_ways,
+        ARRAY_AGG(DISTINCT pjw.join_way) FILTER (WHERE pjw.join_way IS NOT NULL) AS join_ways,
 
         psc.is_non_face_to_face,
         psc.is_bank_app,
@@ -189,26 +223,28 @@ async def get_finproduct_list(
         psc.is_utility_linked, psc.is_card_usage, psc.is_first_transaction,
         psc.is_checking_account, psc.is_pension_linked, psc.is_redeposit,
         psc.is_subscription_linked, psc.is_recommend_coupon, psc.is_auto_transfer
-    {order_clause}
     """
+
+    # ----------------------------------------------------------
+    # [6] 정렬 (SELECT 별칭 활용)
+    # ----------------------------------------------------------
+    if interest_rate_sort == "include_bonus":  # 최고금리순
+        data_sql += "\nORDER BY max_interest_rate DESC NULLS LAST"
+    else:  # base_only: 기본금리순
+        data_sql += "\nORDER BY min_interest_rate DESC NULLS LAST"
 
     if page_size > 0:
         data_sql += "\nLIMIT :limit OFFSET :offset"
-        params.update({
-            "limit": page_size,
-            "offset": (page_num - 1) * page_size,
-        })
+        params["limit"] = page_size
+        params["offset"] = (page_num - 1) * page_size
 
     # ----------------------------------------------------------
-    # [6] SQL 실행
+    # [7] SQL 실행
     # ----------------------------------------------------------
     if DEBUG:
-        print("=== COUNT SQL ===")
-        print(count_sql)
-        print("=== DATA SQL ===")
-        print(data_sql)
-        print("=== PARAMS ===")
-        print(params)
+        print("=== COUNT SQL ==="); print(count_sql)
+        print("=== DATA SQL ==="); print(data_sql)
+        print("=== PARAMS ==="); print(params)
 
     count_result = await db.execute(text(count_sql), params)
     total_count = count_result.scalar()
@@ -220,20 +256,24 @@ async def get_finproduct_list(
         raise HTTPException(status_code=404, detail={"message": "No financial products found"})
 
     # ----------------------------------------------------------
-    # [7] 후처리: 상품유형 chip 생성
+    # [8] 후처리: 상품유형 chip 생성
+    #   - '방문없이 가입': join_ways에 '영업점'이 없으면 추가
+    #   - '누구나 가입'  : join_member에 키워드 존재하면 추가
     # ----------------------------------------------------------
     finproduct_list = []
     for item in rows:
-        product_type_chip = []
+        product_type_chip: list[str] = []
 
-        # ① 방문없이 가입: join_ways 중 '영업점'이 없을 경우
+        # ① 방문없이 가입
         join_ways = item.get("join_ways") or []
         if not any("영업점" in (way or "") for way in join_ways):
             product_type_chip.append("방문없이 가입")
 
-        # ② 누구나 가입: join_member 문자열 검사
-        join_member = (item.get("join_member") or "").replace(" ", "")
-        if any(keyword in join_member for keyword in UNLIMITED_JOIN_KEYWORDS):
+        # ② 누구나 가입
+        join_member_raw = (item.get("join_member") or "")
+        # 공백/개행 제거 후 키워드 검사
+        join_member_norm = join_member_raw.replace(" ", "").replace("\n", "")
+        if any(keyword in join_member_norm for keyword in UNLIMITED_JOIN_KEYWORDS):
             product_type_chip.append("누구나 가입")
 
         finproduct_list.append(
@@ -241,7 +281,7 @@ async def get_finproduct_list(
                 finproduct_id=item["id"],
                 bank_id=item["bank_id"],
                 product_name=item["product_name"],
-                bank_name=item["bank_name"],
+                bank_name=item["bank_name"],  # master.bank.nickname
                 product_type_chip=product_type_chip,
                 max_interest_rate=float(item["max_interest_rate"] or 0),
                 min_interest_rate=float(item["min_interest_rate"] or 0),
@@ -249,7 +289,7 @@ async def get_finproduct_list(
         )
 
     # ----------------------------------------------------------
-    # [8] 응답
+    # [9] 응답
     # ----------------------------------------------------------
     return {
         "result": {
