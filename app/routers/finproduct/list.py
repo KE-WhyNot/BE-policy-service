@@ -61,6 +61,9 @@ async def get_finproduct_list(
     page_num: int = Query(default=1, description="페이지 번호"),
     page_size: int = Query(default=10, description="페이지 크기 (0 입력 시 전체 출력)"),
 
+    # 디버그용
+    finproduct_id: int | None = Query(default=None, description="💻 디버그용 금융상품 ID"),
+
     # 필터
     banks: list[int] | None = Query(default=None, description="은행 ID 리스트"),
     periods: list[int] | None = Query(default=None, description="기간 필터 (6, 12, 24개월)"),
@@ -86,6 +89,12 @@ async def get_finproduct_list(
     # ----------------------------------------------------------
     # [2] 필터 조건
     # ----------------------------------------------------------
+    
+    # 디버그용 finproduct_id 필터
+    if finproduct_id:
+        where_conditions.append("p.id = :finproduct_id")
+        params["finproduct_id"] = finproduct_id
+
     if banks:
         where_conditions.append("b.id = ANY(string_to_array(:banks, ',')::int[])")
         params["banks"] = ",".join(map(str, banks))
