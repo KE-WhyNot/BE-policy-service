@@ -100,7 +100,7 @@ async def get_finproduct_list(
         params["banks"] = ",".join(map(str, banks))
 
     if periods:
-        where_conditions.append("po.save_trm = :periods")
+        where_conditions.append("po.save_trm >= :periods")
         params["periods"] = periods
 
     if special_conditions:
