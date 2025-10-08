@@ -9,6 +9,7 @@ from app.routers.policy import id as policy_id
 
 # FinProduct
 from app.routers.finproduct import filter as finproduct_filter
+from app.routers.finproduct import list as finproduct_list
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Policy Service", version="1.0.0")
@@ -24,7 +25,8 @@ def create_app() -> FastAPI:
 
     # FinProduct
     app.include_router(finproduct_filter.router, prefix="/api/finproduct")
-
+    app.include_router(finproduct_list.router, prefix="/api/finproduct")
+    
     return app
 
 app = create_app()
