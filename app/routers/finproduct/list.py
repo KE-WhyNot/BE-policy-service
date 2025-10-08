@@ -65,8 +65,8 @@ async def get_finproduct_list(
     finproduct_id: int | None = Query(default=None, description="💻 디버그용 금융상품 ID"),
 
     # 필터
-    banks: list[int] | None = Query(default=None, description="은행 ID 리스트"),
-    periods: list[int] | None = Query(default=None, description="기간 필터 (6, 12, 24개월)"),
+    banks: list[int] | None = Query(default=None, description="은행 ID 리스트 (/api/finproduct/filter/bank 에서 확인)"),
+    periods: int | None = Query(default=None, description="기간 필터 (6, 12, 24개월)"),
     special_conditions: list[str] | None = Query(default=None, description="우대조건 필터 (여러개 가능)"),
     interest_rate_sort: str = Query(default="include_bonus", description="금리 정렬 (최고금리순 : include_bonus / 기본금리순 : base_only)"),
 
@@ -100,8 +100,8 @@ async def get_finproduct_list(
         params["banks"] = ",".join(map(str, banks))
 
     if periods:
-        period_conditions = [f"po.save_trm = {p}" for p in periods]
-        where_conditions.append("(" + " OR ".join(period_conditions) + ")")
+        where_conditions.append("po.save_trm = :periods")
+        params["periods"] = periods
 
     if special_conditions:
         # TODO: 우대조건별 매핑 dict 구성 필요
@@ -147,7 +147,7 @@ async def get_finproduct_list(
     SELECT DISTINCT
         p.id,
         b.id AS bank_id,
-        p.kor_co_nm AS bank_name,
+        b.nickname AS bank_name,  -- ✅ 수정됨
         p.fin_prdt_nm AS product_name,
         p.join_member,
         p.etc_note,
@@ -183,7 +183,7 @@ async def get_finproduct_list(
     {base_tables}
     {where_clause}
     GROUP BY
-        p.id, b.id, p.kor_co_nm, p.fin_prdt_nm,
+        p.id, b.id, b.nickname, p.fin_prdt_nm,
         p.join_member, p.etc_note,
         psc.is_non_face_to_face, psc.is_bank_app, psc.is_salary_linked,
         psc.is_utility_linked, psc.is_card_usage, psc.is_first_transaction,
