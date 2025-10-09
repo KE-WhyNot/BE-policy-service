@@ -3,3 +3,5 @@
 .env.secrets
 .DS_Store
 __pycache__/
+
+dumps/
