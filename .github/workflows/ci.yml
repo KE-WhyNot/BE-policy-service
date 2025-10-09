@@ -27,7 +27,7 @@ jobs:
     # ⚠️ Settings()가 import 시 필수 ENV를 요구하므로 여기서 더미값 주입(실제 연결은 안 함)
     env:
       APP_ENV: test
-      PORT: 8000
+      PORT: 8082
       PG_DSN_ASYNC: postgresql+asyncpg://app:pw@localhost:5432/youthpolicy
       PG_DSN_ASYNC_FIN: postgresql+asyncpg://app:pw@localhost:5432/finproduct
 

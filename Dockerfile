@@ -2,7 +2,7 @@
 FROM python:3.11-slim
 
 # 환경 변수 (포트와 파이썬 / pip 동작 관련)
-ENV PORT=8000 \
+ENV PORT=8082 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
