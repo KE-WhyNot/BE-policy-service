@@ -2,7 +2,7 @@
 # 환경변수 / 비밀키 로드 설정 (pydantic-settings 기반)
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List, Optional
+from typing import List
 
 class Settings(BaseSettings):
     # 기본 환경
