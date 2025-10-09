@@ -62,12 +62,19 @@ UNLIMITED_JOIN_KEYWORDS = [
     },
 )
 async def get_finproduct_detail(
-    finproduct_id: int = Path(..., description="조회할 금융상품의 ID"),
+    finproduct_id: str = Path(..., description="조회할 금융상품의 ID"),
     db: AsyncSession = Depends(get_fin_db),
 ):
     """
     금융상품 상세 정보 조회
     """
+    try:
+        finproduct_id_int = int(str(finproduct_id).strip())
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=404,
+            detail={"message": "FinProduct not found", "finproduct_id": finproduct_id},
+        )
 
     # ----------------------------------------------------------
     # [1] 메인 금융상품 정보 (core.product + bank + join_way + special_condition + option)
@@ -149,7 +156,7 @@ async def get_finproduct_detail(
     # ----------------------------------------------------------
     # [3] DB 실행
     # ----------------------------------------------------------
-    main_result = await db.execute(text(main_sql), {"finproduct_id": finproduct_id})
+    main_result = await db.execute(text(main_sql), {"finproduct_id": finproduct_id_int})
     main_row = main_result.mappings().first()
 
     if not main_row:
@@ -158,7 +165,7 @@ async def get_finproduct_detail(
             detail={"message": "FinProduct not found", "finproduct_id": finproduct_id},
         )
 
-    options_result = await db.execute(text(options_sql), {"finproduct_id": finproduct_id})
+    options_result = await db.execute(text(options_sql), {"finproduct_id": finproduct_id_int})
     options_rows = options_result.mappings().all()
 
     # ----------------------------------------------------------

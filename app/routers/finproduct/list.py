@@ -65,6 +65,20 @@ SPECIAL_CONDITION_MAP = {
     "자동이체": "psc.is_auto_transfer",
 }
 
+# ----------------------------------------------------------
+# [상수 정의] 상품유형 문자열 → 내부 코드 매핑
+#   - 프론트/테스트에서 들어오는 다양한 표현을 허용
+# ----------------------------------------------------------
+PRODUCT_TYPE_ALIASES = {
+    "예금": "DEPOSIT",
+    "적금": "SAVING",
+    "deposit": "DEPOSIT",
+    "deposits": "DEPOSIT",
+    "saving": "SAVING",
+    "savings": "SAVING",
+}
+PRODUCT_TYPE_ALL_KEYWORDS = {"0", "all", "전체", "전체보기"}
+
 
 # ----------------------------------------------------------
 # [엔드포인트] /api/finproduct/list
@@ -86,8 +100,8 @@ async def get_finproduct_list(
     finproduct_id: int | None = Query(default=None, description="💻 디버그용 금융상품 ID"),
 
     # 필터
-    banks: list[int] | None = Query(default=None, description="은행 ID 리스트 (/api/finproduct/filter/bank 에서 확인)"),
-    product_type: int | None = Query(default=None, description="상품 유형: 0(전체), 1(예금만), 2(적금만)"),
+    banks: list[str] | None = Query(default=None, description="은행 식별자 (ID 또는 이름). 다중 선택 시 ?banks=1&banks=국민은행"),
+    product_type: str | int | None = Query(default=None, description="상품 유형: 0/전체, 1/예금, 2/적금, 텍스트(예금/적금) 허용"),
     periods: int | None = Query(default=None, description="기간 필터: 해당 개월수 이상의 옵션 보유 상품만 (예: 6/12/24)"),
     special_conditions: list[str] | None = Query(
         default=None,
@@ -121,16 +135,50 @@ async def get_finproduct_list(
         params["finproduct_id"] = finproduct_id
 
     # 2-2) banks (PostgreSQL ANY 배열 바인딩)
-    if banks is not None and len(banks) > 0:
-        where_conditions.append("b.id = ANY(:banks)")
-        params["banks"] = banks  # list[int] 그대로 전달 (asyncpg가 int[]로 바인딩)
+    if banks:
+        bank_ids: list[int] = []
+        bank_names: list[str] = []
+        for raw_bank in banks:
+            value = (raw_bank or "").strip()
+            if not value:
+                continue
+            if value.isdigit():
+                bank_ids.append(int(value))
+            else:
+                bank_names.append(value)
+
+        if bank_ids and bank_names:
+            where_conditions.append("(b.id = ANY(:bank_ids) OR b.nickname = ANY(:bank_names))")
+            params["bank_ids"] = bank_ids
+            params["bank_names"] = bank_names
+        elif bank_ids:
+            where_conditions.append("b.id = ANY(:bank_ids)")
+            params["bank_ids"] = bank_ids
+        elif bank_names:
+            where_conditions.append("b.nickname = ANY(:bank_names)")
+            params["bank_names"] = bank_names
 
     # 2-3) product_type (0: 전체, 1: 예금만, 2: 적금만)
-    if product_type == 1:
+    product_type_filter = None
+    if product_type is not None:
+        if isinstance(product_type, int):
+            product_type_filter = {1: "DEPOSIT", 2: "SAVING"}.get(product_type)
+        else:
+            raw_type = str(product_type).strip()
+            if raw_type:
+                if raw_type.isdigit():
+                    product_type_filter = {1: "DEPOSIT", 2: "SAVING"}.get(int(raw_type))
+                elif raw_type in PRODUCT_TYPE_ALL_KEYWORDS or raw_type.lower() in PRODUCT_TYPE_ALL_KEYWORDS:
+                    product_type_filter = None
+                else:
+                    alias = PRODUCT_TYPE_ALIASES.get(raw_type) or PRODUCT_TYPE_ALIASES.get(raw_type.lower())
+                    product_type_filter = alias
+
+    if product_type_filter == "DEPOSIT":
         where_conditions.append("p.product_type = 'DEPOSIT'")
-    elif product_type == 2:
+    elif product_type_filter == "SAVING":
         where_conditions.append("p.product_type = 'SAVING'")
-    # product_type == 0 또는 None인 경우 조건 추가 안함 (전체 조회)
+    # product_type == 전체 또는 None인 경우 조건 추가 안함 (전체 조회)
 
     # 2-4) periods (해당 개월수 이상인 옵션이 하나라도 있는 상품)
     if periods is not None:
