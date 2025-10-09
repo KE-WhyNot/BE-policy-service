@@ -1,1 +1,7 @@
 .env
+.env.docker
+.env.secrets
+.DS_Store
+__pycache__/
+
+dumps/
