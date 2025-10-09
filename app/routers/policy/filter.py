@@ -2,20 +2,20 @@ from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-from apps.api.core.db import get_db
+from app.core.db import get_db
 
-from apps.api.schemas.master.category import Category
-from apps.api.schemas.master.education import Education
-from apps.api.schemas.master.job_status import JobStatus
-from apps.api.schemas.master.keyword import Keyword
-from apps.api.schemas.master.major import Major
-from apps.api.schemas.master.region import Region
-from apps.api.schemas.master.specialization import Specialization
-from apps.api.schemas.master.response import ListResponse, Meta
+from app.schemas.policy.category import Category
+from app.schemas.policy.education import Education
+from app.schemas.policy.job_status import JobStatus
+from app.schemas.policy.keyword import Keyword
+from app.schemas.policy.major import Major
+from app.schemas.policy.region import Region
+from app.schemas.policy.specialization import Specialization
+from app.schemas.policy.response import ListResponse, Meta
 
-router = APIRouter(prefix="/master", tags=["master"])
+router = APIRouter(prefix="/filter", tags=["[POLICY] Filters"])
 
-# /api/master/category
+# /api/policy/filter/category
 @router.get("/category/{parent_id}", response_model=list[Category])
 async def list_category(
     parent_id: int = Path(..., description="0이면 최상위 카테고리, 실제 ID면 해당 카테고리의 하위 카테고리"),
@@ -47,7 +47,7 @@ async def list_category(
     rows = (await db.execute(text(sql))).mappings().all()
     return [Category(**r) for r in rows]
 
-# /api/master/education
+# /api/policy/filter/education
 @router.get("/education", response_model=list[Education])
 async def list_education(
     include_inactive: bool = Query(False, description="true면 비활성 포함"),
@@ -65,7 +65,7 @@ async def list_education(
     # mappings() 결과는 dict-like → Pydantic 모델로 바로 캐스팅 가능
     return [Education(**r) for r in rows]
 
-# /api/master/job_status
+# /api/policy/filter/job_status
 @router.get("/job_status", response_model=list[JobStatus])
 async def list_job_status(
     include_inactive: bool = Query(False, description="true면 비활성 포함"),
@@ -81,7 +81,7 @@ async def list_job_status(
     rows = (await db.execute(text(sql))).mappings().all()
     return [JobStatus(**r) for r in rows]
 
-# /api/master/keyword
+# /api/policy/filter/keyword
 @router.get("/keyword", response_model=list[Keyword])
 async def list_keyword(
     include_inactive: bool = Query(False, description="true면 비활성 포함"),
@@ -97,7 +97,7 @@ async def list_keyword(
     rows = (await db.execute(text(sql))).mappings().all()
     return [Keyword(**r) for r in rows]
 
-# /api/master/major
+# /api/policy/filter/major
 @router.get("/major", response_model=list[Major])
 async def list_major(
     include_inactive: bool = Query(False, description="true면 비활성 포함"),
@@ -113,7 +113,7 @@ async def list_major(
     rows = (await db.execute(text(sql))).mappings().all()
     return [Major(**r) for r in rows]
 
-# /api/master/region
+# /api/policy/filter/region
 @router.get("/region/{parent_id}", response_model=ListResponse[Region])
 async def list_region(
     parent_id: int = Path(..., description="2이면 최상위 지역(시/도), 실제 ID면 해당 지역의 하위 지역(시/군/구)"),
@@ -156,7 +156,7 @@ async def list_region(
         meta=Meta(count=len(regions))
     )
 
-# /api/master/specialization
+# /api/policy/filter/specialization
 @router.get("/specialization", response_model=list[Specialization])
 async def list_specialization(
     include_inactive: bool = Query(False, description="true면 비활성 포함"),

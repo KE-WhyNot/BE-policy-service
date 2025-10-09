@@ -3,8 +3,8 @@ from fastapi import APIRouter, HTTPException, Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-from apps.api.core.db import get_db
-from apps.api.schemas.policy.policy_id import (
+from app.core.db import get_db
+from app.schemas.policy.policy_id import (
     PolicyDetailResponse, 
     PolicyNotFoundResponse,
     PolicyTop,
@@ -15,11 +15,11 @@ from apps.api.schemas.policy.policy_id import (
     PolicyMeta
 )
 
-router = APIRouter(tags=["policy"])
+router = APIRouter(tags=["[POLICY] Policy List and Detail"])
 
 
 @router.get(
-    "/policy/{policy_id}", 
+    "/{id}", 
     response_model=PolicyDetailResponse,
     responses={
         200: {"description": "정책 상세 조회 성공"},
@@ -29,7 +29,7 @@ router = APIRouter(tags=["policy"])
     }
 )
 async def get_policy_detail(
-    policy_id: str = Path(..., description="조회할 정책의 ID"),
+    id: str = Path(..., description="조회할 정책의 ID"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -204,14 +204,14 @@ async def get_policy_detail(
         WHERE p.id = :policy_id
     """
     
-    result = await db.execute(text(sql), {"policy_id": policy_id})
+    result = await db.execute(text(sql), {"policy_id": id})
     row = result.mappings().first()
     
     # 정책이 존재하지 않는 경우 404 에러
     if not row:
         raise HTTPException(
             status_code=404,
-            detail={"message": "Policy not found", "policy_id": policy_id}
+            detail={"message": "Policy not found", "policy_id": id}
         )
     
     # 중첩된 구조로 데이터 매핑 (중복 제거된 버전)

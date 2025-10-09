@@ -1,22 +1,22 @@
 # TODO: 정렬 쿼리 추가 (마감임박순, 최신순, 오래된 순)
 # TODO: 마감된 정책은 마지막에 출력
 
-DEBUG = True
+DEBUG = False
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-from apps.api.core.db import get_db
-from apps.api.schemas.policy.policy import(
+from app.core.db import get_db
+from app.schemas.policy.policy import(
     PolicyListResponse,
     PolicyListNotFoundResponse
 )
 
-router = APIRouter(tags=["policy"])
+router = APIRouter(tags=["[POLICY] Policy List and Detail"])
 
 @router.get(
-    "/policy",
+    "/list",
     responses = {
         200: {"description": "정책 리스트 조회 성공"},
         400: {"description": "잘못된 요청"},
