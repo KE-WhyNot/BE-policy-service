@@ -19,7 +19,7 @@ from app.schemas.finproduct.finproduct_id import (
 
 router = APIRouter(tags=["[FINPRODUCT] Financial Product List and Detail"])
 
-DEBUG = True
+DEBUG = False
 
 # ----------------------------------------------------------
 # [상수 정의] '누구나 가입' 판별 키워드

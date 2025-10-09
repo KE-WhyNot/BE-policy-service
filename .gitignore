@@ -1,3 +1,4 @@
 .env
+.env.docker
 .DS_Store
 __pycache__/
