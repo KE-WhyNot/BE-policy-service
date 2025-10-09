@@ -97,7 +97,7 @@ jobs:
 
       # --- (옵션) INFRA 레포 Helm values.yaml 자동 업데이트: main에서만 ---
       - name: Checkout INFRA
-        if: ${{ github.ref == 'refs/heads/main' && secrets.INFRA_PAT != '' }}
+        if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/checkout@v4
         with:
           repository: KE-WhyNot/INFRA
@@ -106,13 +106,13 @@ jobs:
           path: INFRA
 
       - name: Install yq
-        if: ${{ github.ref == 'refs/heads/main' && secrets.INFRA_PAT != '' }}
+        if: ${{ github.ref == 'refs/heads/main' }}
         run: |
           sudo curl -L https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o /usr/local/bin/yq
           sudo chmod +x /usr/local/bin/yq
 
       - name: Update Helm values
-        if: ${{ github.ref == 'refs/heads/main' && secrets.INFRA_PAT != '' }}
+        if: ${{ github.ref == 'refs/heads/main' }}
         env:
           IMAGE_REPO: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
           IMAGE_TAG: ${{ github.sha }}
