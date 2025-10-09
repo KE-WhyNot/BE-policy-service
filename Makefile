@@ -5,31 +5,35 @@ run:
 
 # Test commands (실제 API 동작 테스트)
 test:
-	PYTHONPATH=. .venv/bin/pytest tests/ -v
+	APP_ENV=test USE_NULL_POOL=1 PYTHONPATH=. .venv/bin/pytest tests/ -v
 
 test-health:
-	PYTHONPATH=. .venv/bin/pytest tests/test_health.py -v
+	APP_ENV=test USE_NULL_POOL=1 PYTHONPATH=. .venv/bin/pytest tests/test_health.py -v
 
 test-policy:
-	PYTHONPATH=. .venv/bin/pytest tests/test_policy.py -v
+	APP_ENV=test USE_NULL_POOL=1 PYTHONPATH=. .venv/bin/pytest tests/test_policy.py -v
 
 test-finproduct:
-	PYTHONPATH=. .venv/bin/pytest tests/test_finproduct.py -v
+	APP_ENV=test USE_NULL_POOL=1 PYTHONPATH=. .venv/bin/pytest tests/test_finproduct.py -v
 
 test-integration:
-	PYTHONPATH=. .venv/bin/pytest tests/test_integration.py -v
+	APP_ENV=test USE_NULL_POOL=1 PYTHONPATH=. .venv/bin/pytest tests/test_integration.py -v
 
 test-coverage:
-	PYTHONPATH=. .venv/bin/pytest tests/ --cov=app --cov-report=html --cov-report=term
+	APP_ENV=test USE_NULL_POOL=1 PYTHONPATH=. .venv/bin/pytest tests/ --cov=app --cov-report=html --cov-report=term
 
 test-verbose:
-	PYTHONPATH=. .venv/bin/pytest tests/ -v -s
+	APP_ENV=test USE_NULL_POOL=1 PYTHONPATH=. .venv/bin/pytest tests/ -v -s
 
 test-quick:
-	PYTHONPATH=. .venv/bin/pytest tests/test_health.py tests/test_integration.py::TestAPIConnectivity -v
+	APP_ENV=test USE_NULL_POOL=1 PYTHONPATH=. .venv/bin/pytest tests/test_health.py tests/test_integration.py::TestAPIConnectivity -v
 
 test-no-db:
-	PYTHONPATH=. .venv/bin/pytest tests/test_health.py tests/test_simple.py -v
+	APP_ENV=test USE_NULL_POOL=1 PYTHONPATH=. .venv/bin/pytest tests/test_health.py tests/test_simple.py -v
+
+test-mock:
+	APP_ENV=test USE_NULL_POOL=1 PYTHONPATH=. .venv/bin/pytest tests/test_mock_api.py -v || \
+	APP_ENV=test USE_NULL_POOL=1 PYTHONPATH=. python3 -m pytest tests/test_mock_api.py -v
 
 # Install dependencies
 install:

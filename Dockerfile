@@ -30,6 +30,7 @@ COPY ./app /app/app
 # 테스트 코드 복사 (테스트 실행용)
 COPY ./tests /app/tests
 COPY ./pyproject.toml /app/pyproject.toml
+COPY ./Makefile /app/Makefile
 
 # 포트 노출 (문서화 목적)
 EXPOSE ${PORT}
