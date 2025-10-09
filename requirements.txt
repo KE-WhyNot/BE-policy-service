@@ -6,6 +6,7 @@ cachetools==6.2.0
 certifi==2025.8.3
 charset-normalizer==3.4.3
 click==8.3.0
+coverage==7.10.7
 deepdiff==8.6.1
 fastapi==0.117.1
 google-ai-generativelanguage==0.6.15
@@ -24,12 +25,15 @@ httpcore==1.0.9
 httplib2==0.31.0
 httpx==0.28.1
 idna==3.10
+iniconfig==2.1.0
 Mako==1.3.10
 MarkupSafe==3.0.3
 numpy==2.3.3
 orderly-set==5.5.0
 orjson==3.11.3
+packaging==25.0
 pandas==2.3.2
+pluggy==1.6.0
 proto-plus==1.26.1
 protobuf==5.29.5
 psycopg==3.2.10
@@ -40,7 +44,11 @@ pyasn1_modules==0.4.2
 pydantic==2.11.9
 pydantic-settings==2.10.1
 pydantic_core==2.33.2
+Pygments==2.19.2
 pyparsing==3.2.5
+pytest==8.4.2
+pytest-asyncio==1.2.0
+pytest-cov==7.0.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
 pytz==2025.2
@@ -59,8 +67,3 @@ uritemplate==4.2.0
 urllib3==2.5.0
 uvicorn==0.36.0
 websockets==15.0.1
-
-# Testing dependencies
-pytest==8.3.4
-pytest-asyncio==0.25.0
-httpx==0.28.1
