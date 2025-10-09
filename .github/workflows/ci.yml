@@ -1,0 +1,128 @@
+name: CI (Python/FastAPI)
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main", "develop"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  IMAGE_NAME: "policy-service"
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # ⚠️ Settings()가 import 시 필수 ENV를 요구하므로 여기서 더미값 주입(실제 연결은 안 함)
+    env:
+      APP_ENV: test
+      PORT: 8082
+      PG_DSN_ASYNC: postgresql+asyncpg://app:pw@localhost:5432/youthpolicy
+      PG_DSN_ASYNC_FIN: postgresql+asyncpg://app:pw@localhost:5432/finproduct
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+
+      - name: Install deps (app + dev)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest ruff black
+
+      - name: Run tests (pytest)
+        run: PYTHONPATH=. pytest tests/test_mock_api.py -q
+
+      # --- Docker Build & Push (브랜치별 태깅) ---
+      - name: Set up Docker Buildx
+        if: ${{ hashFiles('**/Dockerfile') != '' }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        if: ${{ hashFiles('**/Dockerfile') != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & Push image (develop)
+        if: ${{ hashFiles('**/Dockerfile') != '' && github.ref == 'refs/heads/develop' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:develop
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & Push image (main)
+        if: ${{ hashFiles('**/Dockerfile') != '' && github.ref == 'refs/heads/main' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # --- (옵션) INFRA 레포 Helm values.yaml 자동 업데이트: main에서만 ---
+      - name: Checkout INFRA
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/checkout@v4
+        with:
+          repository: KE-WhyNot/INFRA
+          ref: main
+          token: ${{ secrets.INFRA_PAT }}
+          path: INFRA
+
+      - name: Install yq
+        if: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          sudo curl -L https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 -o /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Update Helm values
+        if: ${{ github.ref == 'refs/heads/main' }}
+        env:
+          IMAGE_REPO: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ github.sha }}
+          HELM_VALUES_PATH: k8s/policy-service/helm/values.yaml
+        run: |
+          set -euo pipefail
+          cd INFRA
+          yq -i '.image.repository = env(IMAGE_REPO)' "$HELM_VALUES_PATH"
+          yq -i '.image.tag = env(IMAGE_TAG)' "$HELM_VALUES_PATH"
+          if git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.email "action@github.com"
+          git config user.name "github-actions[bot]"
+          git add "$HELM_VALUES_PATH"
+          git commit -m "[CHORE] policy-service 이미지 갱신: ${IMAGE_TAG:0:12}"
+          git push origin HEAD:main
