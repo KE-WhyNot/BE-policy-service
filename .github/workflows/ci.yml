@@ -50,7 +50,7 @@ jobs:
           pip install pytest ruff black
 
       - name: Run tests (pytest)
-        run: pytest tests/test_mock_api.py -q
+        run: PYTHONPATH=. pytest tests/test_mock_api.py -q
 
       # --- Docker Build & Push (브랜치별 태깅) ---
       - name: Set up Docker Buildx
