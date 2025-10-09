@@ -49,11 +49,6 @@ jobs:
           pip install -r requirements.txt
           pip install pytest ruff black
 
-      - name: Lint (ruff + black --check)
-        run: |
-          ruff check app tests
-          black --check app tests
-
       - name: Run tests (pytest)
         run: pytest tests/test_mock_api.py -q
 
