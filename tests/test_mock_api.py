@@ -33,6 +33,7 @@ class MockFinProductSession:
                 "id": 101,
                 "bank_id": 1,
                 "bank_name": "모크은행",
+                "bank_image_url": "https://example.com/mock-bank-logo.png",
                 "product_name": "모크 자유적금",
                 "join_member": "누구나 가입가능",
                 "etc_note": None,
