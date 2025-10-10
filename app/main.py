@@ -14,7 +14,47 @@ from app.schemas.finproduct import finproduct_id
 from app.routers.finproduct import id as finproduct_id
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Policy Service", version="1.0.0")
+    
+    openapi_tags = [
+        # Health
+        {
+            "name": "[HEALTH] Health Check", 
+            "description": "서비스 상태 확인 API"
+        },
+        # Policy
+        {
+            "name": "[청년정책] 필터 조회", 
+            "description": "정책분야, 퍼스널 정보에서 표시할 필터 목록"
+        },
+        {
+            "name": "[청년정책] 리스트 조회", 
+            "description": "필터링된 청년정책 목록 리스트 표시"
+        },
+        {
+            "name": "[청년정책] 상세페이지 조회", 
+            "description": "id path parameter로 청년정책 상세페이지 반환"
+        },
+        # FinProduct
+        {
+            "name": "[금융상품] 필터 조회", 
+            "description": "은행 목록, 우대조건"
+        },
+        {
+            "name": "[금융상품] 리스트 조회", 
+            "description": "필터링된 금융상품 목록 리스트 표시"
+        },
+        {
+            "name": "[금융상품] 상세페이지 조회", 
+            "description": "id path parameter로 금융상품 상세페이지 반환"
+        },
+    ]
+    
+    app = FastAPI(
+        title="Policy Service", 
+        version="1.0.0",
+        openapi_tags=openapi_tags
+    )
+
     setup_cors(app)
     
     # Health

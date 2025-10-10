@@ -17,7 +17,7 @@ from app.schemas.finproduct.finproduct_id import (
     FinProductBottom2
 )
 
-router = APIRouter(tags=["[FINPRODUCT] Financial Product List and Detail"])
+router = APIRouter(tags=["[금융상품] 상세페이지 조회"])
 
 DEBUG = False
 
