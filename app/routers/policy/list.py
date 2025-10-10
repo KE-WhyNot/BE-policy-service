@@ -39,12 +39,12 @@ async def get_policy_list(
 # 정책 분야
     # 카테고리(소분류) 체크박스
     # 받은 name값과 일치하는 master.category의 name으로 master.category의 id 조회 -> core.policy_category에서 category_id로 policy_id 조회
-    category_small: list[str] | None = Query(default=None, description="카테고리(소분류) : 한글 name값"),
+    category_small: list[str] | None = Query(default=None, description="카테고리(소분류) : 한글 name값 **(참고: /api/policy/filter/category/{parent_id})**"),
 
 # 퍼스널 정보
     # 지역 (checkbox list)
     # 받은 regions 리스트 내 region_id로 core.policy_region에서 region_id로 policy_id 조회
-    regions: list[str] | None = Query(default=None, description="지역 : id 값 리스트"),
+    regions: list[str] | None = Query(default=None, description="지역 : id 값 리스트 **(참고: /api/policy/filter/region/{parent_id})**"),
 
     # 혼인여부 (dropdown: 제한없음 / 기혼 / 미혼)
     # core.policy_eligibility에서 marital_status(ANY / MARRIED / SINGLE / UNKNOWN)로 policy_id 조회 - UNKNOWN은 ANY 취급
@@ -65,27 +65,27 @@ async def get_policy_list(
     # 학력 (multi-select chip)
     # 받은 name 값 -> master.education에서 name으로 id 조회 -> core.policy_eligibility_education에서 education_id로 policy_id 조회
     # core.policy_eligibility.restrict_education=True인 경우만 필터링, False인 경우 제한없음으로 간주
-    education: list[str] | None = Query(default=None, description="학력 : 한글 name 값 리스트"),
+    education: list[str] | None = Query(default=None, description="학력 : 한글 name 값 리스트 **(참고: /api/policy/filter/education)**"),
 
     # 전공요건 (multi-select chip)
     # 받은 name 값 -> master.major에서 name으로 id 조회 -> core.policy_eligibility_major에서 major_id로 policy_id 조회
     # core.policy_eligibility.restrict_major=True인 경우만 필터링, False인 경우 제한없음으로 간주
-    major: list[str] | None = Query(default=None, description="전공요건 : 한글 name 값 리스트"),
+    major: list[str] | None = Query(default=None, description="전공요건 : 한글 name 값 리스트 **(참고: /api/policy/filter/major)**"),
 
     # 취업상태 (multi-select chip)
     # 받은 name 값 -> master.job_status에서 name으로 id 조회 -> core.policy_eligibility_job_status에서 job_status_id로 policy_id 조회
     # core.policy_eligibility.restrict_job_status=True인 경우만 필터링, False인 경우 제한없음으로 간주
-    job_status: list[str] | None = Query(default=None, description="취업상태 : 한글 name 값 리스트"),
+    job_status: list[str] | None = Query(default=None, description="취업상태 : 한글 name 값 리스트 **(참고: /api/policy/filter/job_status)**"),
 
     # 특화분야 (multi-select chip)
     # 받은 name 값 -> master.specialization에서 name으로 id 조회 -> core.policy_eligibility_specialization에서 specialization_id로 policy_id 조회
     # core.policy_eligibility_specialization 존재하는 경우만 필터링, 없는 경우 제한없음으로 간주
-    specialization: list[str] | None = Query(default=None, description="특화분야 : 한글 name 값 리스트"),
+    specialization: list[str] | None = Query(default=None, description="특화분야 : 한글 name 값 리스트 **(참고: /api/policy/filter/specialization)**"),
 
 # 키워드 ("검색결과에 포함된 #태그를 선택해 찾고싶은 정책을 조회해보세요.")
     # 키워드 (mutli-select chip)
     # 받은 name 값 -> master.keyword에서 name으로 id 조회 -> core.policy_keyword에서 keyword_id로 policy_id 조회
-    keyword: list[str] | None = Query(default=None, description="키워드 : 한글 name 값 리스트"),
+    keyword: list[str] | None = Query(default=None, description="키워드 : 한글 name 값 리스트 **(참고: /api/policy/filter/keyword)**"),
 
 # DB session
     db: AsyncSession = Depends(get_db)

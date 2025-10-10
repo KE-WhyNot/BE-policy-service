@@ -42,7 +42,9 @@ async def list_special_condition(
     type: int = Query(..., description="1:예금, 2:적금")
 ):
     """
-    우대조건 chip 필터 목록 조회
+    우대조건 chip 필터 목록 조회\n
+    ⚠️ 예금일 때와 적금일 때 다름에 주의\n
+    type: 1(예금), 2(적금)
     """
     if type == 1:
         conditions = SPECIAL_CONDITIONS_DEPOSIT
