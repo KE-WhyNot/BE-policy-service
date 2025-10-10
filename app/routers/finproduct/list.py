@@ -240,6 +240,7 @@ async def get_finproduct_list(
         p.id,
         b.id AS bank_id,
         b.nickname AS bank_name,
+        b.image_url AS bank_image_url,
         p.fin_prdt_nm AS product_name,
         p.join_member,
         p.etc_note,
@@ -265,7 +266,7 @@ async def get_finproduct_list(
     {base_tables}
     {where_clause}
     GROUP BY
-        p.id, b.id, b.nickname, p.fin_prdt_nm,
+        p.id, b.id, b.nickname, b.image_url, p.fin_prdt_nm,
         p.join_member, p.etc_note,
         psc.is_non_face_to_face, psc.is_bank_app, psc.is_salary_linked,
         psc.is_utility_linked, psc.is_card_usage, psc.is_first_transaction,
@@ -328,6 +329,7 @@ async def get_finproduct_list(
             FinProductListResponse(
                 finproduct_id=item["id"],
                 bank_id=item["bank_id"],
+                image_url=item["bank_image_url"] or "",
                 product_name=item["product_name"],
                 bank_name=item["bank_name"],  # master.bank.nickname
                 product_type_chip=product_type_chip,
