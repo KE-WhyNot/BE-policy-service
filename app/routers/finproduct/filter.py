@@ -26,7 +26,7 @@ async def list_bank(
         where_condition = "top_fin_grp_no = '0303000'" 
 
     sql = f"""
-        SELECT id, top_fin_grp_no, fin_co_no, kor_co_nm, nickname
+        SELECT id, top_fin_grp_no, fin_co_no, kor_co_nm, nickname, image_url
         FROM master.bank
         WHERE {where_condition}
         ORDER BY id
