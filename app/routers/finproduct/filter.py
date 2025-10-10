@@ -7,7 +7,7 @@ from app.core.db import get_fin_db
 from app.schemas.finproduct.bank import Bank
 from app.schemas.finproduct.special_condition import SpecialCondition
 
-router = APIRouter(prefix="/filter", tags=["[FINPRODUCT] Filters"])
+router = APIRouter(prefix="/filter", tags=["[금융상품] 필터 조회"])
 
 # /api/finproduct/filter/bank
 @router.get("/bank", response_model=list[Bank])
@@ -42,7 +42,9 @@ async def list_special_condition(
     type: int = Query(..., description="1:예금, 2:적금")
 ):
     """
-    우대조건 chip 필터 목록 조회
+    우대조건 chip 필터 목록 조회\n
+    ⚠️ 예금일 때와 적금일 때 다름에 주의\n
+    type: 1(예금), 2(적금)
     """
     if type == 1:
         conditions = SPECIAL_CONDITIONS_DEPOSIT
