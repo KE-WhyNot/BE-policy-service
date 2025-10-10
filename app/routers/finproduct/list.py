@@ -13,7 +13,7 @@ from app.core.db import get_fin_db
 from app.schemas.finproduct.finproduct import FinProductListResponse
 
 
-router = APIRouter(tags=["[FINPRODUCT] Financial Product List and Detail"])
+router = APIRouter(tags=["[금융상품] 리스트 조회"])
 DEBUG = False
 
 # ----------------------------------------------------------

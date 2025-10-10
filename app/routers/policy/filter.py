@@ -13,7 +13,7 @@ from app.schemas.policy.region import Region
 from app.schemas.policy.specialization import Specialization
 from app.schemas.policy.response import ListResponse, Meta
 
-router = APIRouter(prefix="/filter", tags=["[POLICY] Filters"])
+router = APIRouter(prefix="/filter", tags=["[청년정책] 필터 조회"])
 
 # /api/policy/filter/category
 @router.get("/category/{parent_id}", response_model=list[Category])

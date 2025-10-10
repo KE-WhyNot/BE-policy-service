@@ -7,7 +7,7 @@ from app.core.db import get_fin_db
 from app.schemas.finproduct.bank import Bank
 from app.schemas.finproduct.special_condition import SpecialCondition
 
-router = APIRouter(prefix="/filter", tags=["[FINPRODUCT] Filters"])
+router = APIRouter(prefix="/filter", tags=["[금융상품] 필터 조회"])
 
 # /api/finproduct/filter/bank
 @router.get("/bank", response_model=list[Bank])

@@ -15,7 +15,7 @@ from app.schemas.policy.policy_id import (
     PolicyMeta
 )
 
-router = APIRouter(tags=["[POLICY] Policy List and Detail"])
+router = APIRouter(tags=["[청년정책] 상세페이지 조회"])
 
 
 @router.get(

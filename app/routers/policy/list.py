@@ -13,7 +13,7 @@ from app.schemas.policy.policy import(
     PolicyListNotFoundResponse
 )
 
-router = APIRouter(tags=["[POLICY] Policy List and Detail"])
+router = APIRouter(tags=["[청년정책] 리스트 조회"])
 
 @router.get(
     "/list",
