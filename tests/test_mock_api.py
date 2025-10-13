@@ -131,7 +131,7 @@ def test_policy_list_with_mock_data():
     assert len(result["youthPolicyList"]) == 1
     policy = result["youthPolicyList"][0]
 
-    assert policy["policy_id"] == 501
+    assert policy["policy_id"] == "501"
     assert policy["title"] == "모크 청년 도약 자금"
     assert policy["status"].startswith("마감 D-")
     assert "청년" in policy["keyword"]
