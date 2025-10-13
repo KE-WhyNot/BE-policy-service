@@ -10,11 +10,11 @@
 
 정렬 파라미터(sort_by):
 - deadline: 마감 임박순 (apply_end 오름차순, 상시/무기한은 뒤로, CLOSED는 항상 마지막)
-- newest:   최신순 (created_at DESC, CLOSED는 항상 마지막)
-- oldest:   오래된순 (created_at ASC, CLOSED는 항상 마지막)
+- newest:   최신순 (first_external_created DESC, CLOSED는 항상 마지막)
+- oldest:   오래된순 (first_external_created ASC, CLOSED는 항상 마지막)
 
 주의:
-- p.created_at 컬럼이 존재해야 newest/oldest 정렬이 의미 있습니다.
+- p.first_external_created 컬럼이 존재해야 newest/oldest 정렬이 의미 있습니다.
   (없다면 created_at을 다른 기준으로 교체하세요.)
 """
 
@@ -52,8 +52,8 @@ async def get_policy_list(
     page_num: int = Query(default=1, ge=1, description="페이지 번호"),
     page_size: int = Query(default=10, ge=0, description="페이지 크기 (0 입력 시 전체 출력)"),
 
-    # 검색어 (간단 ILIKE — FTS 미구현)
-    search_word: Optional[str] = Query(default=None, description="검색어 : ❌ full-text search 아직 미구현 ❌ "),
+    # 검색어 (pg_trgm 기반 유사 검색)
+    search_word: Optional[str] = Query(default=None, description="검색어 (pg_trgm 기반 유사 검색)"),
 
     # 디버그용
     policy_id: Optional[str] = Query(default=None, description="💻 디버그용 정책 ID"),
@@ -97,8 +97,14 @@ async def get_policy_list(
         except ValueError:
             raise HTTPException(status_code=400, detail="policy_id는 숫자여야 합니다.")
 
+    # search_word는 ORDER BY에서, search_like는 WHERE에서 항상 참조
+    # PostgreSQL 타입 추론을 위해 None 대신 빈 문자열 사용
     if search_word:
+        params["search_word"] = search_word
         params["search_like"] = f"%{search_word}%"
+    else:
+        params["search_word"] = ""  # None 대신 빈 문자열 (타입 추론 위해)
+        params["search_like"] = ""  # None 대신 빈 문자열
 
     if as_list(keyword):
         params["keyword"] = keyword
@@ -133,8 +139,14 @@ async def get_policy_list(
     if "policy_id" in params:
         where_blocks.append("p.id = :policy_id")
 
-    if "search_like" in params:
-        where_blocks.append("(p.title ILIKE :search_like OR p.summary_raw ILIKE :search_like)")
+    # search_word가 실제 값이 있을 때만 검색 조건 추가
+    if search_word:  # params에 있고 None이 아닐 때
+        where_blocks.append(
+            "("
+            "  p.title % :search_word OR p.summary_raw % :search_word OR p.description_raw % :search_word"
+            "  OR p.title ILIKE :search_like OR p.summary_raw ILIKE :search_like OR p.description_raw ILIKE :search_like"
+            ")"
+        )
 
     if "keyword" in params:
         where_blocks.append(
@@ -247,7 +259,16 @@ async def get_policy_list(
     where_sql = "WHERE 1=1" + ((" AND " + " AND ".join(where_blocks)) if where_blocks else "")
 
     # ------------------------------------------------------
-    # 1) COUNT SQL
+    # 1) pg_trgm 유사도 임계값 설정 (검색어가 있을 때만)
+    # ------------------------------------------------------
+    if search_word:  # 실제 검색어가 있을 때만
+        # 기본값: 0.3 (30%)
+        # 낮출수록 더 많은 결과 반환 (예: 0.1 = 10% 유사도만 있어도 매칭)
+        # 높일수록 더 엄격한 매칭 (예: 0.5 = 50% 이상 유사해야 매칭)
+        await db.execute(text("SELECT set_limit(0.1);"))
+    
+    # ------------------------------------------------------
+    # 2) COUNT SQL
     # ------------------------------------------------------
     count_sql = f"""
     WITH filtered_p AS (
@@ -275,11 +296,11 @@ async def get_policy_list(
         limit_clause = "\nLIMIT :limit OFFSET :offset"
 
     # ------------------------------------------------------
-    # 2) DATA SQL (사전집계 CTE + 정렬키)
+    # 3) DATA SQL (사전집계 CTE + 정렬키)
     # ------------------------------------------------------
     data_sql = f"""
     WITH filtered_p AS (
-      SELECT p.id, p.status, p.apply_type, p.apply_start, p.apply_end, p.title, p.summary_raw, p.created_at
+      SELECT p.id, p.status, p.apply_type, p.apply_start, p.apply_end, p.title, p.summary_raw, p.description_raw, p.first_external_created
       FROM core.policy p
       {where_sql}
     ),
@@ -344,7 +365,7 @@ async def get_policy_list(
           WHEN p.apply_type='PERIODIC' AND p.apply_end IS NOT NULL THEN p.apply_end
           ELSE DATE '9999-12-30'
         END AS sort_deadline,
-        p.created_at
+        p.first_external_created
       FROM filtered_p p
     )
     SELECT
@@ -386,9 +407,17 @@ async def get_policy_list(
     JOIN sort_keys sk ON sk.id = p.id
     ORDER BY
       sk.closed_last ASC,
-      CASE WHEN :sort_by = 'deadline' THEN sk.sort_deadline END ASC NULLS LAST,
-      CASE WHEN :sort_by = 'newest'   THEN sk.created_at   END DESC NULLS LAST,
-      CASE WHEN :sort_by = 'oldest'   THEN sk.created_at   END ASC  NULLS LAST,
+      CASE 
+        WHEN :search_word != '' THEN 
+          GREATEST(
+            similarity(p.title, :search_word),
+            similarity(p.summary_raw, :search_word),
+            similarity(p.description_raw, :search_word)
+          )
+      END DESC NULLS LAST,
+      CASE WHEN :search_word = '' AND :sort_by = 'deadline' THEN sk.sort_deadline END ASC NULLS LAST,
+      CASE WHEN :search_word = '' AND :sort_by = 'newest'   THEN sk.first_external_created END DESC NULLS LAST,
+      CASE WHEN :search_word = '' AND :sort_by = 'oldest'   THEN sk.first_external_created END ASC  NULLS LAST,
       p.id
     {limit_clause}
     ;
@@ -409,7 +438,7 @@ async def get_policy_list(
         )
 
     # ------------------------------------------------------
-    # 3) 응답 직렬화
+    # 4) 응답 직렬화
     # ------------------------------------------------------
     def str_to_list(value: Optional[str]) -> List[str]:
         if value:
