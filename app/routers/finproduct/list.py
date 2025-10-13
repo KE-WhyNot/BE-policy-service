@@ -13,7 +13,7 @@ from app.core.db import get_fin_db
 from app.schemas.finproduct.finproduct import FinProductListResponse
 
 
-router = APIRouter(tags=["[FINPRODUCT] Financial Product List and Detail"])
+router = APIRouter(tags=["[금융상품] 리스트 조회"])
 DEBUG = False
 
 # ----------------------------------------------------------
@@ -100,12 +100,12 @@ async def get_finproduct_list(
     finproduct_id: int | None = Query(default=None, description="💻 디버그용 금융상품 ID"),
 
     # 필터
-    banks: list[str] | None = Query(default=None, description="은행 식별자 (ID 또는 이름). 다중 선택 시 ?banks=1&banks=국민은행"),
+    banks: list[str] | None = Query(default=None, description="은행 식별자 (id 또는 nickname). **(참고: /api/finproduct/filter/bank)**"),
     product_type: str | int | None = Query(default=None, description="상품 유형: 0/전체, 1/예금, 2/적금, 텍스트(예금/적금) 허용"),
     periods: int | None = Query(default=None, description="기간 필터: 해당 개월수 이상의 옵션 보유 상품만 (예: 6/12/24)"),
     special_conditions: list[str] | None = Query(
         default=None,
-        description="우대조건 필터 (여러개 가능) -> 비대면가입, 은행앱사용, 급여연동, 공과금연동, 카드사용, 첫거래, 입출금통장, 연금, 재예치, 청약보유, 추천/쿠폰, 자동이체"
+        description="우대조건 필터 (여러개 가능) -> 비대면가입, 은행앱사용, 급여연동, 공과금연동, 카드사용, 첫거래, 입출금통장, 연금, 재예치, 청약보유, 추천/쿠폰, 자동이체 **(참고: /api/finproduct/filter/special_condition)**"
     ),
     interest_rate_sort: str = Query(default="include_bonus", description="정렬: include_bonus(최고금리순) / base_only(기본금리순)"),
 
@@ -240,6 +240,7 @@ async def get_finproduct_list(
         p.id,
         b.id AS bank_id,
         b.nickname AS bank_name,
+        b.image_url AS bank_image_url,
         p.fin_prdt_nm AS product_name,
         p.join_member,
         p.etc_note,
@@ -265,7 +266,7 @@ async def get_finproduct_list(
     {base_tables}
     {where_clause}
     GROUP BY
-        p.id, b.id, b.nickname, p.fin_prdt_nm,
+        p.id, b.id, b.nickname, b.image_url, p.fin_prdt_nm,
         p.join_member, p.etc_note,
         psc.is_non_face_to_face, psc.is_bank_app, psc.is_salary_linked,
         psc.is_utility_linked, psc.is_card_usage, psc.is_first_transaction,
@@ -328,6 +329,7 @@ async def get_finproduct_list(
             FinProductListResponse(
                 finproduct_id=item["id"],
                 bank_id=item["bank_id"],
+                image_url=item["bank_image_url"] or "",
                 product_name=item["product_name"],
                 bank_name=item["bank_name"],  # master.bank.nickname
                 product_type_chip=product_type_chip,

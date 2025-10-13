@@ -8,6 +8,9 @@ class FinProductListResponse(BaseModel):
     # 은행 ID
     bank_id: int
 
+    # 은행 로고 URL
+    image_url: str
+
     # 상품명
     product_name: str
 

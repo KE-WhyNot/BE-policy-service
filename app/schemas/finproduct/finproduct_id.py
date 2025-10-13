@@ -22,6 +22,9 @@ class FinProductTop(BaseModel):
     # 상품유형 Chip (방문없이 가입, 누구나 가입)
     product_type_chip: List[str] = []
     
+    # 이미지 URL
+    image_url: str
+    
     # 최고금리
     max_interest_rate: str
     

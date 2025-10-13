@@ -17,7 +17,7 @@ from app.schemas.finproduct.finproduct_id import (
     FinProductBottom2
 )
 
-router = APIRouter(tags=["[FINPRODUCT] Financial Product List and Detail"])
+router = APIRouter(tags=["[금융상품] 상세페이지 조회"])
 
 DEBUG = False
 
@@ -92,6 +92,7 @@ async def get_finproduct_detail(
             -- 은행 정보
             b.id AS bank_id,
             b.nickname AS bank_name,
+            b.image_url AS bank_image_url,
 
             -- 가입방법 정보
             ARRAY_AGG(DISTINCT pjw.join_way) AS join_ways,
@@ -123,7 +124,7 @@ async def get_finproduct_detail(
         WHERE p.id = :finproduct_id
         GROUP BY 
             p.id, p.fin_prdt_nm, p.kor_co_nm, p.join_member, p.join_way, 
-            p.etc_note, p.spcl_cnd, b.id, b.nickname,
+            p.etc_note, p.spcl_cnd, b.id, b.nickname, b.image_url,
             psc.is_non_face_to_face, psc.is_bank_app, psc.is_salary_linked,
             psc.is_utility_linked, psc.is_card_usage, psc.is_first_transaction,
             psc.is_checking_account, psc.is_pension_linked, psc.is_redeposit,
@@ -203,6 +204,7 @@ async def get_finproduct_detail(
         bank_name=main_row["bank_name"] or main_row["bank_name_from_product"],
         bank_id=main_row["bank_id"] or 0,
         product_type_chip=product_type_chip,
+        image_url=main_row["bank_image_url"] or "",
         max_interest_rate=str(max_rate),
         min_interest_rate=str(min_rate),
     )

@@ -6,3 +6,4 @@ class Bank(BaseModel):
     fin_co_no: str
     kor_co_nm: str
     nickname: str
+    image_url: str

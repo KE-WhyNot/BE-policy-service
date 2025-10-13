@@ -33,6 +33,7 @@ class MockFinProductSession:
                 "id": 101,
                 "bank_id": 1,
                 "bank_name": "모크은행",
+                "bank_image_url": "https://example.com/mock-bank-logo.png",
                 "product_name": "모크 자유적금",
                 "join_member": "누구나 가입가능",
                 "etc_note": None,
@@ -66,7 +67,7 @@ class MockPolicySession:
         closing_date = date.today() + timedelta(days=10)
         self._rows = [
             {
-                "id": 501,
+                "id": "501",
                 "status": "OPEN",
                 "apply_type": "PERIODIC",
                 "apply_end": closing_date,
@@ -130,7 +131,7 @@ def test_policy_list_with_mock_data():
     assert len(result["youthPolicyList"]) == 1
     policy = result["youthPolicyList"][0]
 
-    assert policy["policy_id"] == 501
+    assert policy["policy_id"] == "501"
     assert policy["title"] == "모크 청년 도약 자금"
     assert policy["status"].startswith("마감 D-")
     assert "청년" in policy["keyword"]
