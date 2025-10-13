@@ -67,7 +67,7 @@ class MockPolicySession:
         closing_date = date.today() + timedelta(days=10)
         self._rows = [
             {
-                "id": 501,
+                "id": "501",
                 "status": "OPEN",
                 "apply_type": "PERIODIC",
                 "apply_end": closing_date,
