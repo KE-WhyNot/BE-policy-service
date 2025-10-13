@@ -1,6 +1,3 @@
-# TODO: 정렬 쿼리 추가 (마감임박순, 최신순, 오래된 순)
-# TODO: 마감된 정책은 마지막에 출력
-
 DEBUG = False
 
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -28,6 +25,9 @@ async def get_policy_list(
 # 페이지네이션
     page_num: int = Query(default=1, description="페이지 번호"),
     page_size: int = Query(default=10, description="페이지 크기 (0 입력 시 전체 출력)"),
+
+# 정렬
+    sort_by: str = Query(default="deadline", description="정렬 기준 : **deadline(마감임박순) / recent(최신등록순) / old(오래된순)**"),
 
 # 검색어
     # TODO: full-text search 추후 구현
@@ -90,6 +90,13 @@ async def get_policy_list(
 # DB session
     db: AsyncSession = Depends(get_db)
 ):
+    # 정렬 파라미터 검증
+    if sort_by not in ["deadline", "recent", "old"]:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "Invalid sort_by parameter. Must be one of: deadline, recent, old"}
+        )
+    
     # 동적 SQL 구성
     base_tables = """
     FROM core.policy p
@@ -210,6 +217,14 @@ async def get_policy_list(
         p.status,
         p.apply_type,
         p.apply_end,
+        p.first_external_created,
+        -- 정렬을 위한 계산 필드 추가
+        CASE WHEN p.status = 'CLOSED' THEN 1 ELSE 0 END as is_closed,
+        CASE 
+            WHEN p.apply_end IS NOT NULL THEN 0
+            WHEN p.apply_type = 'ALWAYS_OPEN' THEN 1
+            ELSE 2
+        END as deadline_priority,
         STRING_AGG(DISTINCT c.name, ', ') as category_small,
         (SELECT cl_parent.name 
          FROM master.category c_first 
@@ -226,6 +241,7 @@ async def get_policy_list(
         p.title,
         p.summary_raw,
         CASE 
+            WHEN p.status = 'CLOSED' THEN '마감'
             WHEN p.apply_type = 'ALWAYS_OPEN' THEN '상시'
             WHEN p.apply_type = 'CLOSED' THEN '마감'
             WHEN p.apply_type = 'PERIODIC' AND p.apply_start IS NOT NULL AND p.apply_end IS NOT NULL 
@@ -247,9 +263,34 @@ async def get_policy_list(
     {all_joins}
     {where_clause}
     GROUP BY p.id, p.status, p.apply_type, p.apply_end, p.title, p.summary_raw, 
-             p.apply_start
-    ORDER BY p.id
+             p.apply_start, p.first_external_created
     """
+    
+    # 정렬 조건 추가
+    if sort_by == "deadline":
+        # 마감임박순: CLOSED 맨 뒤, 날짜 있는 것 우선(마감 가까운 순), 상시
+        order_by = """
+    ORDER BY 
+        is_closed,
+        deadline_priority,
+        p.apply_end ASC NULLS LAST
+        """
+    elif sort_by == "recent":
+        # 최신등록순: CLOSED 맨 뒤, 최신순
+        order_by = """
+    ORDER BY 
+        is_closed,
+        p.first_external_created DESC NULLS LAST
+        """
+    else:  # old
+        # 오래된순: CLOSED 맨 뒤, 오래된순
+        order_by = """
+    ORDER BY 
+        is_closed,
+        p.first_external_created ASC NULLS LAST
+        """
+    
+    data_sql += order_by
 
     # page_size가 0이 아니면 LIMIT/OFFSET 추가
     if page_size > 0:
