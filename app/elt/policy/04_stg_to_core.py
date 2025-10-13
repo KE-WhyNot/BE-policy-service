@@ -147,7 +147,7 @@ def normalize_row(row: Dict[str, Any]) -> NormalizedPolicy:
     ext_id = row["policy_id"]
     ext_source = ETL_SOURCE
     title = raw_json.get("plcyNm", "")
-    summary_raw = raw_json.get("plcyCn", "")
+    summary_raw = raw_json.get("plcyExplnCn", "")
     description_raw = raw_json.get("plcySprtCn", "")
     summary_ai = ai_summary(raw_json)
     # status = set_policy_status(raw_json.get("aplyPrdSeCd", ""), raw_json.get("aplyYmd", "")) # status는 update_policy_status.py에서 별도 처리
