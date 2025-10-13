@@ -27,7 +27,7 @@ async def get_policy_list(
     page_size: int = Query(default=10, description="페이지 크기 (0 입력 시 전체 출력)"),
 
 # 정렬
-    sort_by: str = Query(default="deadline", description="정렬 기준 : deadline(마감임박순) / recent(최신등록순) / old(오래된순)"),
+    sort_by: str = Query(default="deadline", description="정렬 기준 : **deadline(마감임박순) / recent(최신등록순) / old(오래된순)**"),
 
 # 검색어
     # TODO: full-text search 추후 구현
