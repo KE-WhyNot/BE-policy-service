@@ -1,93 +1,86 @@
-# TODO: 정렬 쿼리 추가 (마감임박순, 최신순, 오래된 순)
-# TODO: 마감된 정책은 마지막에 출력
+# app/routers/policy/list.py
 
-DEBUG = False
+"""
+청년정책 리스트 조회 API (고성능 버전)
+
+핵심 아이디어
+1) 필터는 모두 EXISTS 기반으로 먼저 policy id를 좁히고(filtered_p), 
+2) 각 1:N 관계는 policy_id 기준으로 CTE에서 사전 집계하여 붙입니다.
+3) 정렬은 '마감은 항상 마지막'을 1차 키로, deadline/newest/oldest 2차 키로 정렬합니다.
+
+정렬 파라미터(sort_by):
+- deadline: 마감 임박순 (apply_end 오름차순, 상시/무기한은 뒤로, CLOSED는 항상 마지막)
+- newest:   최신순 (first_external_created DESC, CLOSED는 항상 마지막)
+- oldest:   오래된순 (first_external_created ASC, CLOSED는 항상 마지막)
+
+주의:
+- p.first_external_created 컬럼이 존재해야 newest/oldest 정렬이 의미 있습니다.
+  (없다면 created_at을 다른 기준으로 교체하세요.)
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, date
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.schemas.policy.policy import(
+from app.schemas.policy.policy import (
     PolicyListResponse,
-    PolicyListNotFoundResponse
+    PolicyListNotFoundResponse,
 )
 
-router = APIRouter(tags=["[POLICY] Policy List and Detail"])
+router = APIRouter(tags=["[청년정책] 리스트 조회"])
+
+DEBUG = True
+
 
 @router.get(
     "/list",
-    responses = {
+    responses={
         200: {"description": "정책 리스트 조회 성공"},
         400: {"description": "잘못된 요청"},
         404: {"description": "정책을 찾을 수 없음"},
         500: {"description": "서버 오류"},
-    }
+    },
 )
 async def get_policy_list(
-# 페이지네이션
-    page_num: int = Query(default=1, description="페이지 번호"),
-    page_size: int = Query(default=10, description="페이지 크기 (0 입력 시 전체 출력)"),
+    # 페이지네이션
+    page_num: int = Query(default=1, ge=1, description="페이지 번호"),
+    page_size: int = Query(default=10, ge=0, description="페이지 크기 (0 입력 시 전체 출력)"),
 
-    # 검색어 (간단 ILIKE — FTS 미구현)
-    search_word: Optional[str] = Query(default=None, description="검색어 : ❌ full-text search 아직 미구현 ❌ "),
+    # 검색어 (pg_trgm 기반 유사 검색)
+    search_word: Optional[str] = Query(default=None, description="검색어 (pg_trgm 기반 유사 검색)"),
 
-# 디버그용
-    policy_id: str | None = Query(default=None, description="💻 디버그용 정책 ID"),
+    # 디버그용
+    policy_id: Optional[str] = Query(default=None, description="💻 디버그용 정책 ID"),
 
-# 정책 분야
-    # 카테고리(소분류) 체크박스
-    # 받은 name값과 일치하는 master.category의 name으로 master.category의 id 조회 -> core.policy_category에서 category_id로 policy_id 조회
-    category_small: list[str] | None = Query(default=None, description="카테고리(소분류) : 한글 name값"),
+    # 정책 분야
+    category_small: Optional[List[str]] = Query(default=None, description="카테고리(소분류) 한글 name 리스트"),
 
-# 퍼스널 정보
-    # 지역 (checkbox list)
-    # 받은 regions 리스트 내 region_id로 core.policy_region에서 region_id로 policy_id 조회
-    regions: list[str] | None = Query(default=None, description="지역 : id 값 리스트"),
+    # 퍼스널 정보
+    regions: Optional[List[str]] = Query(default=None, description="지역 id 리스트"),
+    marital_status: Optional[str] = Query(default=None, description="혼인여부: 제한없음/기혼/미혼"),
+    age: Optional[int] = Query(default=None, description="연령 숫자"),
+    income_min: Optional[int] = Query(default=None, description="연소득 최소"),
+    income_max: Optional[int] = Query(default=None, description="연소득 최대"),
+    education: Optional[List[str]] = Query(default=None, description="학력 한글 name 리스트"),
+    major: Optional[List[str]] = Query(default=None, description="전공 한글 name 리스트"),
+    job_status: Optional[List[str]] = Query(default=None, description="취업상태 한글 name 리스트"),
+    specialization: Optional[List[str]] = Query(default=None, description="특화분야 한글 name 리스트"),
 
-    # 혼인여부 (dropdown: 제한없음 / 기혼 / 미혼)
-    # core.policy_eligibility에서 marital_status(ANY / MARRIED / SINGLE / UNKNOWN)로 policy_id 조회 - UNKNOWN은 ANY 취급
-    marital_status: str | None = Query(default=None, description="혼인여부 : 제한없음 / 기혼 / 미혼"),
+    # 키워드
+    keyword: Optional[List[str]] = Query(default=None, description="키워드 한글 name 리스트"),
 
-    # 연령 (textinput: numeric)
-    # core.policy_eligibility에서 age_min, age_max 비교 -> core.policy_eligibility에서 policy_id 조회
-    # db에서 age_min, age_max가 NULL인 경우 제한없음으로 간주
-    age: int | None = Query(default=None, description="연령 : 숫자 입력"),
+    # 정렬
+    sort_by: str = Query(default="deadline", pattern="^(deadline|newest|oldest)$",
+                         description="정렬: **deadline(마감임박순), newest(최신순), oldest(오래된순)**"),
 
-    # 연소득 (textinput: range min & max)
-    # core.policy_eligibility에서 income_type(ANY / RANGE / TEXT / UNKNOWN)로 필터링
-    # income_type이 RANGE인 경우 income_min, income_max로 와 비교 -> core.policy_eligibility에서 policy_id 조회
-    # income_type이 ANY, TEXT, UNKNOWN인 경우 제한없음으로 간주
-    income_min: int | None = Query(default=None, description="연소득 최소 : 숫자 입력"),
-    income_max: int | None = Query(default=None, description="연소득 최대 : 숫자 입력"),
-
-    # 학력 (multi-select chip)
-    # 받은 name 값 -> master.education에서 name으로 id 조회 -> core.policy_eligibility_education에서 education_id로 policy_id 조회
-    # core.policy_eligibility.restrict_education=True인 경우만 필터링, False인 경우 제한없음으로 간주
-    education: list[str] | None = Query(default=None, description="학력 : 한글 name 값 리스트"),
-
-    # 전공요건 (multi-select chip)
-    # 받은 name 값 -> master.major에서 name으로 id 조회 -> core.policy_eligibility_major에서 major_id로 policy_id 조회
-    # core.policy_eligibility.restrict_major=True인 경우만 필터링, False인 경우 제한없음으로 간주
-    major: list[str] | None = Query(default=None, description="전공요건 : 한글 name 값 리스트"),
-
-    # 취업상태 (multi-select chip)
-    # 받은 name 값 -> master.job_status에서 name으로 id 조회 -> core.policy_eligibility_job_status에서 job_status_id로 policy_id 조회
-    # core.policy_eligibility.restrict_job_status=True인 경우만 필터링, False인 경우 제한없음으로 간주
-    job_status: list[str] | None = Query(default=None, description="취업상태 : 한글 name 값 리스트"),
-
-    # 특화분야 (multi-select chip)
-    # 받은 name 값 -> master.specialization에서 name으로 id 조회 -> core.policy_eligibility_specialization에서 specialization_id로 policy_id 조회
-    # core.policy_eligibility_specialization 존재하는 경우만 필터링, 없는 경우 제한없음으로 간주
-    specialization: list[str] | None = Query(default=None, description="특화분야 : 한글 name 값 리스트"),
-
-# 키워드 ("검색결과에 포함된 #태그를 선택해 찾고싶은 정책을 조회해보세요.")
-    # 키워드 (mutli-select chip)
-    # 받은 name 값 -> master.keyword에서 name으로 id 조회 -> core.policy_keyword에서 keyword_id로 policy_id 조회
-    keyword: list[str] | None = Query(default=None, description="키워드 : 한글 name 값 리스트"),
-
-# DB session
-    db: AsyncSession = Depends(get_db)
+    # DB
+    db: AsyncSession = Depends(get_db),
 ):
     # ------------------------------------------------------
     # 0) 파라미터 전처리
@@ -104,8 +97,14 @@ async def get_policy_list(
         except ValueError:
             raise HTTPException(status_code=400, detail="policy_id는 숫자여야 합니다.")
 
+    # search_word는 ORDER BY에서, search_like는 WHERE에서 항상 참조
+    # PostgreSQL 타입 추론을 위해 None 대신 빈 문자열 사용
     if search_word:
+        params["search_word"] = search_word
         params["search_like"] = f"%{search_word}%"
+    else:
+        params["search_word"] = ""  # None 대신 빈 문자열 (타입 추론 위해)
+        params["search_like"] = ""  # None 대신 빈 문자열
 
     if as_list(keyword):
         params["keyword"] = keyword
@@ -140,8 +139,14 @@ async def get_policy_list(
     if "policy_id" in params:
         where_blocks.append("p.id = :policy_id")
 
-    if "search_like" in params:
-        where_blocks.append("(p.title ILIKE :search_like OR p.summary_raw ILIKE :search_like)")
+    # search_word가 실제 값이 있을 때만 검색 조건 추가
+    if search_word:  # params에 있고 None이 아닐 때
+        where_blocks.append(
+            "("
+            "  p.title % :search_word OR p.summary_raw % :search_word OR p.description_raw % :search_word"
+            "  OR p.title ILIKE :search_like OR p.summary_raw ILIKE :search_like OR p.description_raw ILIKE :search_like"
+            ")"
+        )
 
     if "keyword" in params:
         where_blocks.append(
@@ -254,20 +259,48 @@ async def get_policy_list(
     where_sql = "WHERE 1=1" + ((" AND " + " AND ".join(where_blocks)) if where_blocks else "")
 
     # ------------------------------------------------------
-    # 1) COUNT SQL
+    # 1) pg_trgm 유사도 임계값 설정 (검색어가 있을 때만)
+    # ------------------------------------------------------
+    if search_word:  # 실제 검색어가 있을 때만
+        # 기본값: 0.3 (30%)
+        # 낮출수록 더 많은 결과 반환 (예: 0.1 = 10% 유사도만 있어도 매칭)
+        # 높일수록 더 엄격한 매칭 (예: 0.5 = 50% 이상 유사해야 매칭)
+        await db.execute(text("SELECT set_limit(0.1);"))
+    
+    # ------------------------------------------------------
+    # 2) COUNT SQL
     # ------------------------------------------------------
     count_sql = f"""
-    SELECT COUNT(DISTINCT p.id) as total_count
-    {all_joins}
-    {where_clause}
+    WITH filtered_p AS (
+      SELECT p.id
+      FROM core.policy p
+      {where_sql}
+    )
+    SELECT COUNT(*) AS total_count
+    FROM filtered_p;
     """
 
+    if DEBUG:
+        print("=== COUNT SQL ===")
+        print(count_sql)
+        print("PARAMS:", params)
+
+    count_result = await db.execute(text(count_sql), params)
+    total_count = count_result.scalar() or 0
+
+    # 페이지 계산용
+    limit_clause = ""
+    if page_size > 0:
+        params["limit"] = page_size
+        params["offset"] = (page_num - 1) * page_size
+        limit_clause = "\nLIMIT :limit OFFSET :offset"
+
     # ------------------------------------------------------
-    # 2) DATA SQL (사전집계 CTE + 정렬키)
+    # 3) DATA SQL (사전집계 CTE + 정렬키)
     # ------------------------------------------------------
     data_sql = f"""
     WITH filtered_p AS (
-      SELECT p.id, p.status, p.apply_type, p.apply_start, p.apply_end, p.title, p.summary_raw, p.created_at
+      SELECT p.id, p.status, p.apply_type, p.apply_start, p.apply_end, p.title, p.summary_raw, p.description_raw, p.first_external_created
       FROM core.policy p
       {where_sql}
     ),
@@ -332,7 +365,7 @@ async def get_policy_list(
           WHEN p.apply_type='PERIODIC' AND p.apply_end IS NOT NULL THEN p.apply_end
           ELSE DATE '9999-12-30'
         END AS sort_deadline,
-        p.created_at
+        p.first_external_created
       FROM filtered_p p
     )
     SELECT
@@ -374,9 +407,17 @@ async def get_policy_list(
     JOIN sort_keys sk ON sk.id = p.id
     ORDER BY
       sk.closed_last ASC,
-      CASE WHEN :sort_by = 'deadline' THEN sk.sort_deadline END ASC NULLS LAST,
-      CASE WHEN :sort_by = 'newest'   THEN sk.created_at   END DESC NULLS LAST,
-      CASE WHEN :sort_by = 'oldest'   THEN sk.created_at   END ASC  NULLS LAST,
+      CASE 
+        WHEN :search_word != '' THEN 
+          GREATEST(
+            similarity(p.title, :search_word),
+            similarity(p.summary_raw, :search_word),
+            similarity(p.description_raw, :search_word)
+          )
+      END DESC NULLS LAST,
+      CASE WHEN :search_word = '' AND :sort_by = 'deadline' THEN sk.sort_deadline END ASC NULLS LAST,
+      CASE WHEN :search_word = '' AND :sort_by = 'newest'   THEN sk.first_external_created END DESC NULLS LAST,
+      CASE WHEN :search_word = '' AND :sort_by = 'oldest'   THEN sk.first_external_created END ASC  NULLS LAST,
       p.id
     {limit_clause}
     ;
@@ -385,11 +426,11 @@ async def get_policy_list(
     if DEBUG:
         print("=== DATA SQL ===")
         print(data_sql)
+        print("PARAMS:", params)
 
     result = await db.execute(text(data_sql), params)
     rows = result.mappings().all()
 
-    # 정책이 존재하지 않는 경우 404 에러
     if not rows:
         raise HTTPException(
             status_code=404,
@@ -397,7 +438,7 @@ async def get_policy_list(
         )
 
     # ------------------------------------------------------
-    # 3) 응답 직렬화
+    # 4) 응답 직렬화
     # ------------------------------------------------------
     def str_to_list(value: Optional[str]) -> List[str]:
         if value:
@@ -435,15 +476,14 @@ async def get_policy_list(
                 keyword=str_to_list(item["keyword"]),
             )
         )
-        policy_list.append(policy_list_response)
 
     return {
         "result": {
             "pagging": {
                 "total_count": total_count,
                 "page_num": page_num,
-                "page_size": page_size if page_size > 0 else total_count
+                "page_size": page_size if page_size > 0 else total_count,
             },
-            "youthPolicyList": policy_list
+            "youthPolicyList": policy_list,
         }
     }
