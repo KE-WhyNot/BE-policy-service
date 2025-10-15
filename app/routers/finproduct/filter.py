@@ -6,6 +6,7 @@ from app.core.db import get_fin_db
 
 from app.schemas.finproduct.bank import Bank
 from app.schemas.finproduct.special_condition import SpecialCondition
+from app.schemas.finproduct.special_type import SpecialType
 
 router = APIRouter(prefix="/filter", tags=["[금융상품] 필터 조회"])
 
@@ -54,6 +55,25 @@ async def list_special_condition(
     rows = conditions.values()
     return [SpecialCondition(**r) for r in rows]
 
+# /api/finproduct/filter/special_type
+@router.get("/special_type", response_model=list[SpecialType])
+async def list_special_type(
+    type: int = Query(..., description="1:예금, 2:적금")
+):
+    """
+    상세유형 chip 필터 목록 조회\n
+    ⚠️ 예금일 때와 적금일 때 다름에 주의\n
+    type: 1(예금), 2(적금)
+    * 예금 : 방문없이 가입, 누구나 가입
+    * 적금 : 방문없이 가입, 청년적금, 군인적금, 주택청약, 자유적금, 정기적금, 청년도약계좌
+
+    """
+    if type == 1:
+        rows = SPECIAL_TYPES_DEPOSIT.values()
+    elif type == 2:
+        rows = SPECIAL_TYPES_SAVING.values()
+    return [SpecialType(**r) for r in rows]
+
 
 SPECIAL_CONDITIONS_DEPOSIT = {
     1: {"id": 1, "name": "비대면가입", "db_row_name": "is_non_face_to_face"},
@@ -77,4 +97,20 @@ SPECIAL_CONDITIONS_SAVING = {
     10: {"id": 10, "name": "청약보유", "db_row_name": "is_subscription_linked"},
     11: {"id": 11, "name": "추천,쿠폰", "db_row_name": "is_recommend_coupon"},
     12: {"id": 12, "name": "자동이체/달성", "db_row_name": "is_auto_transfer"},
+}
+
+SPECIAL_TYPES_DEPOSIT = {
+    1: {"id": 1, "name": "방문없이가입", "db_row_name": "is_no_visit"},
+    2: {"id": 2, "name": "누구나가입", "db_row_name": "is_anyone_join"},
+    
+}
+
+SPECIAL_TYPES_SAVING = {
+    1: {"id": 1, "name": "방문없이가입", "db_row_name": "is_no_visit"},
+    2: {"id": 2, "name": "청년적금", "db_row_name": "is_youth_saving"},    
+    3: {"id": 3, "name": "군인적금", "db_row_name": "is_military_saving"},
+    4: {"id": 4, "name": "주택청약", "db_row_name": "is_housing_saving"},
+    5: {"id": 5, "name": "자유적금", "db_row_name": "is_flexible_saving"},
+    6: {"id": 6, "name": "정기적금", "db_row_name": "is_fixed_saving"},
+    7: {"id": 7, "name": "청년도약계좌", "db_row_name": "is_youth_dream"},
 }
