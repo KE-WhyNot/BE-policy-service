@@ -26,6 +26,7 @@ from sqlalchemy.engine import Engine
 from tqdm.auto import tqdm
 
 # Gemini 관련 import (선택적)
+
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
@@ -55,6 +56,10 @@ PRODUCT_TYPES = {
     "saving":  "SAVING",
 }
 
+# ------------------------
+# 데이터 모델
+# ------------------------
+
 @dataclass
 class SpecialCondition:
     is_non_face_to_face: bool = False
@@ -69,6 +74,17 @@ class SpecialCondition:
     is_subscription_linked: bool = False
     is_recommend_coupon: bool = False
     is_auto_transfer: bool = False
+
+@dataclass
+class SpecialType:
+    is_no_visit: bool = False
+    is_anyone_join: bool = False
+    is_youth_saving: bool = False
+    is_military_saving: bool = False
+    is_housing_saving: bool = False
+    is_flexible_saving: bool = False
+    is_fixed_saving: bool = False
+    is_youth_dream: bool = False
 
 # ------------------------
 # BASE 업서트 (변경 추적 포함)
@@ -339,7 +355,7 @@ WHERE p.id = z.product_id
 # ------------------------
 # Gemini 우대조건 분석
 # ------------------------
-ANALYSIS_PROMPT = """
+ANALYSIS_PROMPT_1 = """
 다음은 은행 예금/적금 상품의 우대조건 텍스트입니다. 
 이 텍스트를 분석하여 아래 12개 카테고리 각각에 해당하는지 true/false로 판단해주세요.
 
@@ -405,7 +421,7 @@ def analyze_special_condition(spcl_cnd: str, max_retries: int = 3) -> Tuple[Opti
     for attempt in range(max_retries):
         try:
             model = genai.GenerativeModel('gemini-2.5-flash-lite')
-            prompt = ANALYSIS_PROMPT.format(spcl_cnd=spcl_cnd)
+            prompt = ANALYSIS_PROMPT_1.format(spcl_cnd=spcl_cnd)
             
             response = model.generate_content(prompt)
             result_text = response.text.strip()
@@ -499,6 +515,154 @@ def save_special_condition(conn, product_id: int, condition: SpecialCondition, e
         "error": error
     })
 
+# ------------------------
+# Gemini 상품유형 분석
+# ------------------------
+ANALYSIS_PROMPT_2 = """
+다음은 은행 예금/적금 상품의 우대조건 텍스트입니다. 
+이 텍스트를 분석하여 아래 8개 카테고리 각각에 해당하는지 true/false로 판단해주세요.
+
+1. is_no_visit: 방문없이가입
+2. is_anyone_join: 누구나가입
+3. is_youth_saving: 청년적금
+4. is_military_saving: 군인적금
+5. is_housing_saving: 주택청약
+6. is_flexible_saving: 자유적금
+7. is_fixed_saving: 정기적금
+8. is_youth_dream: 청년도약계좌
+
+분석할 텍스트:
+{fin_prdt_nm}
+{mtrt_int}
+{spcl_cnd}
+{join_member}
+{etc_note}
+
+
+응답 형식(JSON):
+{{
+    "is_no_visit": true/false,
+    "is_anyone_join": true/false,
+    "is_youth_saving": true/false,
+    "is_military_saving": true/false,
+    "is_housing_saving": true/false,
+    "is_flexible_saving": true/false,
+    "is_fixed_saving": true/false,
+    "is_youth_dream": true/false
+}}
+
+JSON 형태로만 응답해주세요.
+"""
+
+def analyze_special_type(fin_prdt_nm: str, mtrt_int: str, spcl_cnd: str, join_member: str, etc_note: str, max_retries: int = 3) -> Tuple[Optional[SpecialType], bool]:
+    """
+    Gemini API를 사용하여 상품유형 텍스트 분석
+    
+    Returns:
+        Tuple[Optional[SpecialType], bool]: (분석결과, 성공여부)
+        - 분석결과: SpecialType 객체 또는 None
+        - 성공여부: True(성공) 또는 False(실패)
+    """
+    if not GEMINI_AVAILABLE or not GEMINI_API_KEY or GEMINI_API_KEY == "your_gemini_api_key_here":
+        log.warning("Gemini API not available - using default false values")
+        return SpecialType(), False
+        
+    # 3회 재시도 로직
+    for attempt in range(max_retries):
+        try:
+            model = genai.GenerativeModel('gemini-2.5-flash-lite')
+            prompt = ANALYSIS_PROMPT_2.format(
+                fin_prdt_nm=fin_prdt_nm or "",
+                mtrt_int=mtrt_int or "",
+                spcl_cnd=spcl_cnd or "",
+                join_member=join_member or "",
+                etc_note=etc_note or ""
+            )
+            
+            response = model.generate_content(prompt)
+            result_text = response.text.strip()
+            
+            # JSON 파싱
+            if result_text.startswith('```json'):
+                result_text = result_text[7:-3].strip()
+            elif result_text.startswith('```'):
+                result_text = result_text[3:-3].strip()
+                
+            result_dict = json.loads(result_text)
+            
+            special_type = SpecialType(
+                is_no_visit=result_dict.get('is_no_visit', False),
+                is_anyone_join=result_dict.get('is_anyone_join', False),
+                is_youth_saving=result_dict.get('is_youth_saving', False),
+                is_military_saving=result_dict.get('is_military_saving', False),
+                is_housing_saving=result_dict.get('is_housing_saving', False),
+                is_flexible_saving=result_dict.get('is_flexible_saving', False),
+                is_fixed_saving=result_dict.get('is_fixed_saving', False),
+                is_youth_dream=result_dict.get('is_youth_dream', False)
+            )
+            
+            return special_type, True
+            
+        except Exception as e:
+            if DEBUG:
+                log.error(f"Gemini API 상품유형 분석 실패 (시도 {attempt + 1}/{max_retries}): {e}")
+                log.error(f"상품명: {fin_prdt_nm[:100] if fin_prdt_nm else 'N/A'}...")
+            
+            if attempt == max_retries - 1:  # 마지막 시도
+                if DEBUG:
+                    log.error(f"Gemini API 상품유형 분석 최종 실패 - 모든 조건을 false로 설정하고 error=true")
+                return SpecialType(), False
+            else:
+                if DEBUG:
+                    log.info(f"재시도 중... ({attempt + 2}/{max_retries})")
+    
+    # 이 부분은 도달하지 않아야 함
+    return SpecialType(), False
+
+def save_special_type(conn, product_id: int, special_type: SpecialType, error: bool = False) -> None:
+    """상품유형 분석 결과 저장"""
+    query = """
+    INSERT INTO core.product_special_type (
+        product_id, is_no_visit, is_anyone_join, is_youth_saving,
+        is_military_saving, is_housing_saving, is_flexible_saving, is_fixed_saving,
+        is_youth_dream, error, created_at, updated_at
+    ) VALUES (
+        :product_id, :is_no_visit, :is_anyone_join, :is_youth_saving,
+        :is_military_saving, :is_housing_saving, :is_flexible_saving, :is_fixed_saving,
+        :is_youth_dream, :error, now(), now()
+    )
+    ON CONFLICT (product_id) DO UPDATE SET
+        is_no_visit = EXCLUDED.is_no_visit,
+        is_anyone_join = EXCLUDED.is_anyone_join,
+        is_youth_saving = EXCLUDED.is_youth_saving,
+        is_military_saving = EXCLUDED.is_military_saving,
+        is_housing_saving = EXCLUDED.is_housing_saving,
+        is_flexible_saving = EXCLUDED.is_flexible_saving,
+        is_fixed_saving = EXCLUDED.is_fixed_saving,
+        is_youth_dream = EXCLUDED.is_youth_dream,
+        error = EXCLUDED.error,
+        updated_at = now()
+    """
+    
+    conn.execute(text(query), {
+        "product_id": product_id,
+        "is_no_visit": special_type.is_no_visit,
+        "is_anyone_join": special_type.is_anyone_join,
+        "is_youth_saving": special_type.is_youth_saving,
+        "is_military_saving": special_type.is_military_saving,
+        "is_housing_saving": special_type.is_housing_saving,
+        "is_flexible_saving": special_type.is_flexible_saving,
+        "is_fixed_saving": special_type.is_fixed_saving,
+        "is_youth_dream": special_type.is_youth_dream,
+        "error": error
+    })
+        
+
+                
+# ------------------------
+# 가입방법 처리
+# ------------------------
+
 def save_join_ways(conn, product_id: int, join_way: str) -> None:
     """가입방법 데이터 저장 (콤마로 구분된 값을 split하여 각각 저장)"""
     # 기존 데이터 삭제
@@ -566,6 +730,10 @@ def process_join_ways_for_products(conn, changed_product_ids: List[int]) -> int:
         log.info(f"가입방법 처리 완료: {processed_count}개 상품")
     return processed_count
 
+# ------------------------
+# 우대조건 분석 + 통합 처리
+# ------------------------
+
 def analyze_changed_products(conn, changed_product_ids: List[int], skip_gemini: bool = False) -> Tuple[int, int]:
     """변경된 상품들의 우대조건 분석"""
     if skip_gemini or not changed_product_ids:
@@ -625,8 +793,71 @@ def analyze_changed_products(conn, changed_product_ids: List[int], skip_gemini: 
     
     return success_count, failure_count
 
-def upsert_for_type(conn, product_type: str, skip_gemini: bool = False) -> Tuple[int, int, int, int, int, int]:
-    """타입별 업서트 + 우대조건 분석 + 가입방법 처리"""
+# ------------------------
+# 상품유형 분석 + 통합 처리
+# ------------------------
+
+def analyze_special_types(conn, changed_product_ids: List[int], skip_gemini: bool = False) -> Tuple[int, int]:
+    """변경된 상품들의 상품유형 분석"""
+    if skip_gemini or not changed_product_ids:
+        return 0, 0
+    
+    # 모든 상품 조회
+    query = """
+    SELECT id, fin_prdt_nm, mtrt_int, spcl_cnd, join_member, etc_note
+    FROM core.product 
+    WHERE id = ANY(:product_ids) 
+      AND is_current = TRUE
+    """
+    
+    result = conn.execute(text(query), {"product_ids": changed_product_ids})
+    products = [dict(row._mapping) for row in result]
+    
+    success_count = 0
+    failure_count = 0
+    
+    # Progress bar for Gemini processing
+    progress_bar = tqdm(products, desc="Gemini 상품유형 분석", disable=False)
+    
+    for product in progress_bar:
+        product_id = product['id']
+        fin_prdt_nm = product['fin_prdt_nm']
+        mtrt_int = product.get('mtrt_int', '')
+        spcl_cnd = product.get('spcl_cnd', '')
+        join_member = product.get('join_member', '')
+        etc_note = product.get('etc_note', '')
+        
+        if DEBUG:
+            log.info(f"상품유형 분석 중: {fin_prdt_nm}")
+        
+        special_type, is_success = analyze_special_type(
+            fin_prdt_nm=fin_prdt_nm,
+            mtrt_int=mtrt_int,
+            spcl_cnd=spcl_cnd,
+            join_member=join_member,
+            etc_note=etc_note
+        )
+        
+        if special_type is not None:
+            save_special_type(conn, product_id, special_type, error=not is_success)
+            if is_success:
+                success_count += 1
+                if DEBUG:
+                    log.info(f"✓ 상품유형 분석 완료: {product_id}")
+            else:
+                failure_count += 1
+                if DEBUG:
+                    log.warning(f"⚠ 상품유형 분석 실패하여 기본값 적용 (error=true): {product_id}")
+        else:
+            # 이 케이스는 발생하지 않아야 함 (함수 수정으로 인해)
+            failure_count += 1
+            if DEBUG:
+                log.error(f"✗ 상품유형 분석 실패: {product_id}")
+    
+    return success_count, failure_count
+
+def upsert_for_type(conn, product_type: str, skip_gemini: bool = False) -> Tuple[int, int, int, int, int, int, int, int]:
+    """타입별 업서트 + 우대조건 분석 + 상품유형 분석 + 가입방법 처리"""
     changed_product_ids = []
     
     # 1) BASE: close / insert / touch (변경 추적)
@@ -654,9 +885,16 @@ def upsert_for_type(conn, product_type: str, skip_gemini: bool = False) -> Tuple
     join_way_processed = process_join_ways_for_products(conn, changed_product_ids)
     
     # 5) 변경된 상품의 우대조건 분석
-    gemini_success, gemini_failure = analyze_changed_products(conn, changed_product_ids, skip_gemini)
+    gemini_cond_success, gemini_cond_failure = analyze_changed_products(conn, changed_product_ids, skip_gemini)
     
-    return closed_cnt, inserted_cnt, touched_cnt, join_way_processed, gemini_success, gemini_failure
+    # 6) 변경된 상품의 상품유형 분석
+    gemini_type_success, gemini_type_failure = analyze_special_types(conn, changed_product_ids, skip_gemini)
+    
+    return closed_cnt, inserted_cnt, touched_cnt, join_way_processed, gemini_cond_success, gemini_cond_failure, gemini_type_success, gemini_type_failure
+
+# ------------------------
+# 메인 실행
+# ------------------------
 
 def run(which: str, skip_gemini: bool = False) -> None:
     if which not in ("all", "deposit", "saving"):
@@ -667,7 +905,9 @@ def run(which: str, skip_gemini: bool = False) -> None:
     print("✅ Database connection established")
 
     types = ("deposit", "saving") if which == "all" else (which,)
-    total_ins = total_cls = total_tch = total_join = total_gem_suc = total_gem_fail = 0
+    total_ins = total_cls = total_tch = total_join = 0
+    total_gem_cond_suc = total_gem_cond_fail = 0
+    total_gem_type_suc = total_gem_type_fail = 0
 
     for t in types:
         pt = PRODUCT_TYPES[t]
@@ -680,19 +920,22 @@ def run(which: str, skip_gemini: bool = False) -> None:
             print(f"✅ Step 4: Join way processing for {pt}")
             if not skip_gemini:
                 print(f"✅ Step 5: Gemini special condition analysis for {pt}")
+                print(f"✅ Step 6: Gemini special type analysis for {pt}")
             
-            c, i, h, j, gs, gf = upsert_for_type(conn, pt, skip_gemini)
+            c, i, h, j, gcs, gcf, gts, gtf = upsert_for_type(conn, pt, skip_gemini)
             
         total_cls += c
         total_ins += i
         total_tch += h
         total_join += j
-        total_gem_suc += gs
-        total_gem_fail += gf
+        total_gem_cond_suc += gcs
+        total_gem_cond_fail += gcf
+        total_gem_type_suc += gts
+        total_gem_type_fail += gtf
         
-        print(f"✅ {pt} processing completed | opt_closed={c}, opt_inserted={i}, opt_touched={h} | join_way_processed={j} | gemini_success={gs}, gemini_failed={gf}")
+        print(f"✅ {pt} processing completed | opt_closed={c}, opt_inserted={i}, opt_touched={h} | join_way_processed={j} | gemini_cond(success={gcs}, failed={gcf}) | gemini_type(success={gts}, failed={gtf})")
 
-    print(f"✅ ALL PROCESSING COMPLETED | opt_closed={total_cls}, opt_inserted={total_ins}, opt_touched={total_tch} | join_way_processed={total_join} | gemini_success={total_gem_suc}, gemini_failed={total_gem_fail}")
+    print(f"✅ ALL PROCESSING COMPLETED | opt_closed={total_cls}, opt_inserted={total_ins}, opt_touched={total_tch} | join_way_processed={total_join} | gemini_cond(success={total_gem_cond_suc}, failed={total_gem_cond_fail}) | gemini_type(success={total_gem_type_suc}, failed={total_gem_type_fail})")
 
 if __name__ == "__main__":
     args = sys.argv[1:]
