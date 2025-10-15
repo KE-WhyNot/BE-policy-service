@@ -66,6 +66,22 @@ SPECIAL_CONDITION_MAP = {
 }
 
 # ----------------------------------------------------------
+# [상수 정의] 상세유형 문자열 → 컬럼 매핑
+#   - special_types 파라미터로 들어오는 값과 매핑
+#   - AND 조건으로 결합됨 (예: 방문없이가입 AND 청년적금)
+# ----------------------------------------------------------
+SPECIAL_TYPE_MAP = {
+    "방문없이가입": "pst.is_no_visit",
+    "누구나가입": "pst.is_anyone_join",
+    "청년적금": "pst.is_youth_saving",
+    "군인적금": "pst.is_military_saving",
+    "주택청약": "pst.is_housing_saving",
+    "자유적금": "pst.is_flexible_saving",
+    "정기적금": "pst.is_fixed_saving",
+    "청년도약계좌": "pst.is_youth_dream",
+}
+
+# ----------------------------------------------------------
 # [상수 정의] 상품유형 문자열 → 내부 코드 매핑
 #   - 프론트/테스트에서 들어오는 다양한 표현을 허용
 # ----------------------------------------------------------
@@ -110,6 +126,10 @@ async def get_finproduct_list(
         default=None,
         description="우대조건 필터 (여러개 가능) -> 비대면가입, 은행앱사용, 급여연동, 공과금연동, 카드사용, 첫거래, 입출금통장, 연금, 재예치, 청약보유, 추천/쿠폰, 자동이체 **(참고: /api/finproduct/filter/special_condition)**"
     ),
+    special_types: list[str] | None = Query(
+        default=None,
+        description="상세유형 필터 (여러개 가능) -> 방문없이가입, 누구나가입, 청년적금, 군인적금, 주택청약, 자유적금, 정기적금, 청년도약계좌 **(참고: /api/finproduct/filter/special_type)**"
+    ),
     interest_rate_sort: str = Query(default="include_bonus", description="정렬: include_bonus(최고금리순) / base_only(기본금리순)"),
 
     db: AsyncSession = Depends(get_fin_db),
@@ -122,6 +142,7 @@ async def get_finproduct_list(
     FROM core.product p
     LEFT JOIN master.bank b ON p.kor_co_nm = b.kor_co_nm
     LEFT JOIN core.product_special_condition psc ON p.id = psc.product_id
+    LEFT JOIN core.product_special_type pst ON p.id = pst.product_id
     LEFT JOIN core.product_option po ON p.id = po.product_id
     LEFT JOIN core.product_join_way pjw ON p.id = pjw.product_id
     """
@@ -215,6 +236,12 @@ async def get_finproduct_list(
         # 매칭되는 항목이 하나도 없으면 조건을 추가하지 않음
         # (원한다면 400으로 에러 처리하도록 변경 가능)
 
+    # 2-6) special_types (매핑되는 항목만 AND로 결합)
+    if special_types is not None and len(special_types) > 0:
+        matched_cols = [SPECIAL_TYPE_MAP[s] for s in special_types if s in SPECIAL_TYPE_MAP]
+        if matched_cols:
+            where_conditions.append("(" + " OR ".join(f"{c} = TRUE" for c in matched_cols) + ")")
+
     where_clause = "WHERE 1=1 " + ("AND " + " AND ".join(where_conditions) if where_conditions else "")
 
     # ----------------------------------------------------------
@@ -283,7 +310,16 @@ async def get_finproduct_list(
         psc.is_redeposit,
         psc.is_subscription_linked,
         psc.is_recommend_coupon,
-        psc.is_auto_transfer
+        psc.is_auto_transfer,
+
+        pst.is_no_visit,
+        pst.is_anyone_join,
+        pst.is_youth_saving,
+        pst.is_military_saving,
+        pst.is_housing_saving,
+        pst.is_flexible_saving,
+        pst.is_fixed_saving,
+        pst.is_youth_dream
 
     {base_tables}
     {where_clause}
@@ -293,7 +329,10 @@ async def get_finproduct_list(
         psc.is_non_face_to_face, psc.is_bank_app, psc.is_salary_linked,
         psc.is_utility_linked, psc.is_card_usage, psc.is_first_transaction,
         psc.is_checking_account, psc.is_pension_linked, psc.is_redeposit,
-        psc.is_subscription_linked, psc.is_recommend_coupon, psc.is_auto_transfer
+        psc.is_subscription_linked, psc.is_recommend_coupon, psc.is_auto_transfer,
+        pst.is_no_visit, pst.is_anyone_join, pst.is_youth_saving,
+        pst.is_military_saving, pst.is_housing_saving, pst.is_flexible_saving,
+        pst.is_fixed_saving, pst.is_youth_dream
     """
 
     # ----------------------------------------------------------
