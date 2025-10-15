@@ -96,6 +96,9 @@ async def get_finproduct_list(
     page_num: int = Query(default=1, description="페이지 번호"),
     page_size: int = Query(default=10, description="페이지 크기 (0 입력 시 전체 출력)"),
 
+    # 검색어 (pg_trgm 기반 유사 검색)
+    search_word: str | None = Query(default=None, description="검색어 (pg_trgm 기반 유사 검색)"),
+
     # 디버그용 (정확히 해당 상품만 조회)
     finproduct_id: int | None = Query(default=None, description="💻 디버그용 금융상품 ID"),
 
@@ -127,12 +130,31 @@ async def get_finproduct_list(
     params: dict[str, object] = {}
 
     # ----------------------------------------------------------
+    # [1-1] 검색어 파라미터 처리 (PostgreSQL 타입 추론을 위해 빈 문자열 사용)
+    # ----------------------------------------------------------
+    if search_word:
+        params["search_word"] = search_word
+        params["search_like"] = f"%{search_word}%"
+    else:
+        params["search_word"] = ""  # None 대신 빈 문자열 (타입 추론 위해)
+        params["search_like"] = ""  # None 대신 빈 문자열
+
+    # ----------------------------------------------------------
     # [2] 필터 조건
     # ----------------------------------------------------------
     # 2-1) finproduct_id
     if finproduct_id is not None:
         where_conditions.append("p.id = :finproduct_id")
         params["finproduct_id"] = finproduct_id
+
+    # 2-1-1) search_word (pg_trgm 기반 유사 검색)
+    if search_word:
+        where_conditions.append(
+            "("
+            "  p.fin_prdt_nm % :search_word OR p.join_member % :search_word OR p.etc_note % :search_word"
+            "  OR p.fin_prdt_nm ILIKE :search_like OR p.join_member ILIKE :search_like OR p.etc_note ILIKE :search_like"
+            ")"
+        )
 
     # 2-2) banks (PostgreSQL ANY 배열 바인딩)
     if banks:
