@@ -296,13 +296,45 @@ async def get_policy_list(
         limit_clause = "\nLIMIT :limit OFFSET :offset"
 
     # ------------------------------------------------------
-    # 3) DATA SQL (사전집계 CTE + 정렬키)
+    # 3) DATA SQL (정렬 먼저, 필요한 데이터만 집계)
     # ------------------------------------------------------
     data_sql = f"""
     WITH filtered_p AS (
       SELECT p.id, p.status, p.apply_type, p.apply_start, p.apply_end, p.title, p.summary_raw, p.description_raw, p.first_external_created
       FROM core.policy p
       {where_sql}
+    ),
+    sort_keys AS (
+      SELECT
+        p.id,
+        CASE WHEN p.status = 'CLOSED' THEN 1 ELSE 0 END AS closed_last,
+        CASE
+          WHEN p.status = 'CLOSED' THEN DATE '9999-12-31'
+          WHEN p.apply_type='PERIODIC' AND p.apply_end IS NOT NULL THEN p.apply_end
+          ELSE DATE '9999-12-30'
+        END AS sort_deadline,
+        p.first_external_created
+      FROM filtered_p p
+    ),
+    sorted_limited AS (
+      SELECT p.*
+      FROM filtered_p p
+      JOIN sort_keys sk ON sk.id = p.id
+      ORDER BY
+        sk.closed_last ASC,
+        CASE 
+          WHEN :search_word != '' THEN 
+            GREATEST(
+              similarity(p.title, :search_word),
+              similarity(p.summary_raw, :search_word),
+              similarity(p.description_raw, :search_word)
+            )
+        END DESC NULLS LAST,
+        CASE WHEN :search_word = '' AND :sort_by = 'deadline' THEN sk.sort_deadline END ASC NULLS LAST,
+        CASE WHEN :search_word = '' AND :sort_by = 'newest'   THEN sk.first_external_created END DESC NULLS LAST,
+        CASE WHEN :search_word = '' AND :sort_by = 'oldest'   THEN sk.first_external_created END ASC  NULLS LAST,
+        p.id
+      {limit_clause}
     ),
     cat AS (
       SELECT
@@ -319,54 +351,49 @@ async def get_policy_list(
         ) AS category_large
       FROM core.policy_category pc
       JOIN master.category c ON c.id = pc.category_id
+      WHERE pc.policy_id IN (SELECT id FROM sorted_limited)
       GROUP BY pc.policy_id
     ),
     kw AS (
       SELECT pk.policy_id, STRING_AGG(DISTINCT k.name, ', ') AS keyword
       FROM core.policy_keyword pk
       JOIN master.keyword k ON k.id = pk.keyword_id
+      WHERE pk.policy_id IN (SELECT id FROM sorted_limited)
       GROUP BY pk.policy_id
     ),
     rg AS (
       SELECT pr.policy_id, STRING_AGG(DISTINCT pr.region_id::text, ', ') AS regions
       FROM core.policy_region pr
+      WHERE pr.policy_id IN (SELECT id FROM sorted_limited)
       GROUP BY pr.policy_id
     ),
     edu AS (
       SELECT pee.policy_id, STRING_AGG(DISTINCT e.name, ', ') AS education
       FROM core.policy_eligibility_education pee
       JOIN master.education e ON e.id = pee.education_id
+      WHERE pee.policy_id IN (SELECT id FROM sorted_limited)
       GROUP BY pee.policy_id
     ),
     maj AS (
       SELECT pem.policy_id, STRING_AGG(DISTINCT m.name, ', ') AS major
       FROM core.policy_eligibility_major pem
       JOIN master.major m ON m.id = pem.major_id
+      WHERE pem.policy_id IN (SELECT id FROM sorted_limited)
       GROUP BY pem.policy_id
     ),
     job AS (
       SELECT pejs.policy_id, STRING_AGG(DISTINCT js.name, ', ') AS job_status
       FROM core.policy_eligibility_job_status pejs
       JOIN master.job_status js ON js.id = pejs.job_status_id
+      WHERE pejs.policy_id IN (SELECT id FROM sorted_limited)
       GROUP BY pejs.policy_id
     ),
     spec AS (
       SELECT pes.policy_id, STRING_AGG(DISTINCT s.name, ', ') AS specialization
       FROM core.policy_eligibility_specialization pes
       JOIN master.specialization s ON s.id = pes.specialization_id
+      WHERE pes.policy_id IN (SELECT id FROM sorted_limited)
       GROUP BY pes.policy_id
-    ),
-    sort_keys AS (
-      SELECT
-        p.id,
-        CASE WHEN p.status = 'CLOSED' THEN 1 ELSE 0 END AS closed_last,
-        CASE
-          WHEN p.status = 'CLOSED' THEN DATE '9999-12-31'
-          WHEN p.apply_type='PERIODIC' AND p.apply_end IS NOT NULL THEN p.apply_end
-          ELSE DATE '9999-12-30'
-        END AS sort_deadline,
-        p.first_external_created
-      FROM filtered_p p
     )
     SELECT
       p.id,
@@ -396,7 +423,7 @@ async def get_policy_list(
       COALESCE(maj.major,'') AS major,
       COALESCE(job.job_status,'') AS job_status,
       COALESCE(spec.specialization,'') AS specialization
-    FROM filtered_p p
+    FROM sorted_limited p
     LEFT JOIN cat  ON cat.policy_id  = p.id
     LEFT JOIN kw   ON kw.policy_id   = p.id
     LEFT JOIN rg   ON rg.policy_id   = p.id
@@ -404,9 +431,8 @@ async def get_policy_list(
     LEFT JOIN maj  ON maj.policy_id  = p.id
     LEFT JOIN job  ON job.policy_id  = p.id
     LEFT JOIN spec ON spec.policy_id = p.id
-    JOIN sort_keys sk ON sk.id = p.id
     ORDER BY
-      sk.closed_last ASC,
+      CASE WHEN p.status = 'CLOSED' THEN 1 ELSE 0 END ASC,
       CASE 
         WHEN :search_word != '' THEN 
           GREATEST(
@@ -415,11 +441,16 @@ async def get_policy_list(
             similarity(p.description_raw, :search_word)
           )
       END DESC NULLS LAST,
-      CASE WHEN :search_word = '' AND :sort_by = 'deadline' THEN sk.sort_deadline END ASC NULLS LAST,
-      CASE WHEN :search_word = '' AND :sort_by = 'newest'   THEN sk.first_external_created END DESC NULLS LAST,
-      CASE WHEN :search_word = '' AND :sort_by = 'oldest'   THEN sk.first_external_created END ASC  NULLS LAST,
+      CASE WHEN :search_word = '' AND :sort_by = 'deadline' THEN 
+        CASE
+          WHEN p.status = 'CLOSED' THEN DATE '9999-12-31'
+          WHEN p.apply_type='PERIODIC' AND p.apply_end IS NOT NULL THEN p.apply_end
+          ELSE DATE '9999-12-30'
+        END
+      END ASC NULLS LAST,
+      CASE WHEN :search_word = '' AND :sort_by = 'newest'   THEN p.first_external_created END DESC NULLS LAST,
+      CASE WHEN :search_word = '' AND :sort_by = 'oldest'   THEN p.first_external_created END ASC  NULLS LAST,
       p.id
-    {limit_clause}
     ;
     """
 
