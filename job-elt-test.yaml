@@ -1,0 +1,28 @@
+# job-elt-test.yaml
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: elt-test
+  namespace: policy-service
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      restartPolicy: Never
+      containers:
+        - name: elt
+          image: ghcr.io/ke-whynot/be-policy-service:1.0.0
+          command: ["python", "/app/app/elt/policy/run_all_policy_elt.py"]
+          envFrom:
+            - secretRef:
+                name: policy-secrets
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
