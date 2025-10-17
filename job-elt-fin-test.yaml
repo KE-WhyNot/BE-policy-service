@@ -1,0 +1,27 @@
+# job-elt-fin-test.yaml
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: elt-fin-test
+  namespace: policy-service
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: elt-fin
+          image: ghcr.io/ke-whynot/be-policy-service:1.0.0
+          command:
+            ["python", "/app/app/elt/finproduct/run_all_finproduct_elt.py"]
+          envFrom:
+            - secretRef:
+                name: policy-secrets
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
